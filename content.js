@@ -3,12 +3,18 @@ let translatePopup = null;
 let popupResultEl = null;   // direct reference, not searched by id
 let popupLangEl = null;
 let popupLabelEl = null;
+let chatEl = null;
+let chatMessagesEl = null;
+let chatInputEl = null;
+let chatSendEl = null;
 let currentSelection = '';
 let isStreaming = false;
 let isDraggingPopup = false;
 let lastContextMenuPoint = null;
 let activeStreamId = 0;
 let activePort = null;
+let sessionContext = null;
+let chatHistory = [];
 
 function createButton() {
   const btn = document.createElement('div');
@@ -47,13 +53,29 @@ function createPopup() {
       <button class="lt-close">✕</button>
     </div>
     <div class="lt-result"></div>
+    <div class="lt-chat" hidden>
+      <div class="lt-chat-messages"></div>
+      <form class="lt-chat-form">
+        <div class="lt-chat-composer">
+          <input class="lt-chat-input" type="text" placeholder="Ask follow-up..." autocomplete="off">
+          <button class="lt-chat-send" type="submit" aria-label="Send message" title="Send">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+          </button>
+        </div>
+      </form>
+    </div>
   `;
   document.body.appendChild(popup);
   // store direct references — no getElementById on document
   popupLabelEl = popup.querySelector('.lt-label');
   popupLangEl = popup.querySelector('.lt-lang');
   popupResultEl = popup.querySelector('.lt-result');
+  chatEl = popup.querySelector('.lt-chat');
+  chatMessagesEl = popup.querySelector('.lt-chat-messages');
+  chatInputEl = popup.querySelector('.lt-chat-input');
+  chatSendEl = popup.querySelector('.lt-chat-send');
   popup.querySelector('.lt-close').addEventListener('click', hideAll);
+  popup.querySelector('.lt-chat-form').addEventListener('submit', handleChatSubmit);
 
   // Draggable via header
   const header = popup.querySelector('.lt-header');
@@ -87,20 +109,20 @@ function createPopup() {
   return popup;
 }
 
-function showLoading() {
-  if (popupResultEl) {
-    popupResultEl.innerHTML = '<div class="lt-loading"><div class="lt-dot"></div><div class="lt-dot"></div><div class="lt-dot"></div></div>';
+function showLoading(targetEl = popupResultEl) {
+  if (targetEl) {
+    targetEl.innerHTML = '<div class="lt-loading"><div class="lt-dot"></div><div class="lt-dot"></div><div class="lt-dot"></div></div>';
   }
 }
 
-function showError(message) {
-  if (!popupResultEl) return;
+function showError(message, targetEl = popupResultEl) {
+  if (!targetEl) return;
 
-  popupResultEl.textContent = '';
+  targetEl.textContent = '';
   const errorEl = document.createElement('span');
   errorEl.className = 'lt-error';
   errorEl.textContent = message;
-  popupResultEl.appendChild(errorEl);
+  targetEl.appendChild(errorEl);
 }
 
 function showButton(x, y) {
@@ -124,12 +146,54 @@ function showPopup(x, y, targetLang, label = 'Translate') {
   popupLangEl.textContent = targetLang;
 }
 
+function setChatVisible(visible) {
+  if (!chatEl) return;
+  chatEl.hidden = !visible;
+}
+
+function clearChat() {
+  chatHistory = [];
+  if (chatMessagesEl) chatMessagesEl.textContent = '';
+  if (chatInputEl) chatInputEl.value = '';
+  setChatInputEnabled(true);
+}
+
+function resetSession() {
+  sessionContext = null;
+  clearChat();
+  setChatVisible(false);
+}
+
+function appendChatMessage(role, text = '') {
+  const messageEl = document.createElement('div');
+  messageEl.className = `lt-chat-message lt-chat-message-${role}`;
+  messageEl.textContent = text;
+  chatMessagesEl.appendChild(messageEl);
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  return messageEl;
+}
+
+function setChatInputEnabled(enabled) {
+  if (chatInputEl) chatInputEl.disabled = !enabled;
+  if (chatSendEl) chatSendEl.disabled = !enabled;
+}
+
 function getSettings() {
   const defaults = { port: '1234', targetLang: 'русский' };
   const chromeApi = globalThis.chrome;
 
   if (chromeApi?.storage?.sync) {
-    return chromeApi.storage.sync.get(defaults);
+    return new Promise((resolve, reject) => {
+      chromeApi.storage.sync.get(defaults, (settings) => {
+        const err = chromeApi.runtime.lastError;
+        if (err) {
+          reject(new Error(err.message));
+          return;
+        }
+
+        resolve(settings);
+      });
+    });
   }
 
   return new Promise((resolve, reject) => {
@@ -157,9 +221,11 @@ function getSettings() {
 function hideAll() {
   if (translateBtn) translateBtn.style.display = 'none';
   if (translatePopup) translatePopup.style.display = 'none';
+  if (popupResultEl) popupResultEl.textContent = '';
   isStreaming = false;
   activeStreamId++;
   disconnectActivePort();
+  resetSession();
 }
 
 function disconnectActivePort() {
@@ -174,13 +240,15 @@ function disconnectActivePort() {
   activePort = null;
 }
 
-function streamTranslation(payload) {
+function streamTranslation(payload, options = {}) {
   activeStreamId++;
   const streamId = activeStreamId;
   disconnectActivePort();
+  const targetEl = options.targetEl || popupResultEl;
 
   isStreaming = true;
-  showLoading();
+  setChatInputEnabled(false);
+  showLoading(targetEl);
 
   try {
     const port = chrome.runtime.connect({ name: 'translator' });
@@ -194,18 +262,25 @@ function streamTranslation(payload) {
       if (msg.action === 'chunk' && isStreaming) {
         accumulated += msg.text;
         console.log('[CS] accumulated so far:', accumulated);
-        popupResultEl.textContent = accumulated;
+        targetEl.textContent = accumulated;
+        if (chatMessagesEl?.contains(targetEl)) {
+          chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        }
       } else if (msg.action === 'done') {
         console.log('[CS] done. final translation:', accumulated);
         isStreaming = false;
         activePort = null;
+        setChatInputEnabled(true);
         if (!accumulated.trim()) {
-          showError('Empty model response');
+          showError('Empty model response', targetEl);
+        } else if (options.onComplete) {
+          options.onComplete(accumulated);
         }
       } else if (msg.action === 'error') {
         isStreaming = false;
         activePort = null;
-        showError(msg.error || 'Unknown error');
+        setChatInputEnabled(true);
+        showError(msg.error || 'Unknown error', targetEl);
       }
     });
 
@@ -216,8 +291,9 @@ function streamTranslation(payload) {
       activePort = null;
       if (isStreaming) {
         isStreaming = false;
+        setChatInputEnabled(true);
         if (!accumulated.trim()) {
-          showError(err || 'Connection closed');
+          showError(err || 'Connection closed', targetEl);
         }
       }
     });
@@ -228,10 +304,11 @@ function streamTranslation(payload) {
 
     isStreaming = false;
     activePort = null;
+    setChatInputEnabled(true);
     if (err.message?.includes('Extension context invalidated')) {
-      showError('Extension was updated. Reload the page.');
+      showError('Extension was updated. Reload the page.', targetEl);
     } else {
-      showError(err.message);
+      showError(err.message, targetEl);
     }
   }
 }
@@ -252,12 +329,27 @@ async function handleTextAction(action) {
 
     const settings = await getSettings();
     showPopup(btnLeft, btnTop, settings.targetLang, getActionLabel(action));
+    clearChat();
+    sessionContext = {
+      sourceType: 'text',
+      action,
+      originalText: currentSelection,
+      targetLang: settings.targetLang,
+      lastAnswer: ''
+    };
 
     streamTranslation({
       action,
       text: currentSelection,
       lmPort: settings.port,
       targetLang: settings.targetLang
+    }, {
+      onComplete(answer) {
+        if (!sessionContext) return;
+        sessionContext.lastAnswer = answer;
+        setChatVisible(true);
+        chatInputEl?.focus();
+      }
     });
   } catch (err) {
     showPopup(parseInt(translateBtn.style.left) || 10, parseInt(translateBtn.style.top) || 10, 'unknown', getActionLabel(action));
@@ -275,17 +367,73 @@ async function handleImageTranslate(imageUrl) {
 
     if (translateBtn) translateBtn.style.display = 'none';
     showPopup(point.x, point.y, settings.targetLang, 'Translate');
+    clearChat();
+    sessionContext = {
+      sourceType: 'image',
+      action: 'translateImage',
+      originalText: '',
+      targetLang: settings.targetLang,
+      lastAnswer: ''
+    };
 
     streamTranslation({
       action: 'translateImage',
       imageUrl,
       lmPort: settings.port,
       targetLang: settings.targetLang
+    }, {
+      onComplete(answer) {
+        if (!sessionContext) return;
+        sessionContext.lastAnswer = answer;
+        setChatVisible(true);
+        chatInputEl?.focus();
+      }
     });
   } catch (err) {
     const point = lastContextMenuPoint || { x: 10, y: 10 };
     showPopup(point.x, point.y, 'unknown', 'Translate');
     showError(err.message || 'Unable to read extension settings');
+  }
+}
+
+async function handleChatSubmit(e) {
+  e.preventDefault();
+  if (!sessionContext || isStreaming) return;
+
+  const question = chatInputEl.value.trim();
+  if (!question) return;
+
+  try {
+    const settings = await getSettings();
+    chatInputEl.value = '';
+    appendChatMessage('user', question);
+    const assistantEl = appendChatMessage('assistant');
+
+    const history = chatHistory.slice(-6);
+    chatHistory.push({ role: 'user', content: question });
+
+    streamTranslation({
+      action: 'chat',
+      question,
+      context: {
+        sourceType: sessionContext.sourceType,
+        action: sessionContext.action,
+        originalText: sessionContext.originalText,
+        lastAnswer: sessionContext.lastAnswer,
+        history
+      },
+      lmPort: settings.port,
+      targetLang: settings.targetLang
+    }, {
+      targetEl: assistantEl,
+      onComplete(answer) {
+        if (!sessionContext) return;
+        sessionContext.lastAnswer = answer;
+        chatHistory.push({ role: 'assistant', content: answer });
+      }
+    });
+  } catch (err) {
+    appendChatMessage('assistant', err.message || 'Unable to send question');
   }
 }
 
@@ -311,6 +459,7 @@ document.addEventListener('mouseup', (e) => {
       isStreaming = false;
       activeStreamId++;
       disconnectActivePort();
+      resetSession();
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
       showButton(rect.left + rect.width / 2 - 50, rect.top);

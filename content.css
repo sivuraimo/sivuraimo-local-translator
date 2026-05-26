@@ -143,6 +143,114 @@
   scrollbar-color: rgba(113, 113, 122, 0.8) transparent;
 }
 
+.lt-chat {
+  border-top: 1px solid rgba(39, 39, 42, 0.72);
+  background: rgba(9, 9, 11, 0.18);
+}
+
+.lt-chat[hidden] {
+  display: none;
+}
+
+.lt-chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 170px;
+  overflow-y: auto;
+  padding: 12px 14px 0;
+  scrollbar-color: rgba(113, 113, 122, 0.8) transparent;
+}
+
+.lt-chat-message {
+  max-width: 100%;
+  padding: 0;
+  border-radius: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.lt-chat-message-user {
+  align-self: stretch;
+  background: transparent;
+  color: #fafafa;
+  padding-left: 12px;
+  border-left: 2px solid rgba(113, 113, 122, 0.85);
+}
+
+.lt-chat-message-assistant {
+  align-self: stretch;
+  background: transparent;
+  color: #e4e4e7;
+  border: none;
+}
+
+.lt-chat-form {
+  padding: 12px 12px 12px;
+}
+
+.lt-chat-composer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 3px 4px 3px 11px;
+  background: rgba(3, 3, 5, 0.88);
+  border: 1px solid rgba(63, 63, 70, 0.46);
+  border-radius: 8px;
+  box-shadow: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.lt-chat-composer:focus-within {
+  background: rgba(3, 3, 5, 0.96);
+  border-color: rgba(250, 250, 250, 0.86);
+  box-shadow: none;
+}
+
+.lt-chat-input {
+  min-width: 0;
+  flex: 1;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: #fafafa;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.lt-chat-input::placeholder {
+  color: #71717a;
+}
+
+.lt-chat-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.lt-chat-send:hover {
+  background: rgba(63, 63, 70, 0.55);
+  color: #fafafa;
+}
+
+.lt-chat-send:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
 .lt-result:has(.lt-loading) {
   display: flex;
   align-items: center;

@@ -222,6 +222,44 @@ function buildSummarizeBody({ targetLang, text }) {
   };
 }
 
+function buildChatBody({ targetLang, question, context }) {
+  const history = (context.history || [])
+    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`)
+    .join('\n\n');
+  const originalBlock = context.sourceType === 'text' && context.originalText
+    ? `Original selected text:\n${context.originalText}\n\n`
+    : '';
+
+  return {
+    model: 'qwen/qwen3.5-9b',
+    messages: [
+      {
+        role: 'system',
+        content: `Ты продолжаешь работу с контекстом пользователя и отвечаешь на ${targetLang}.
+Отвечай только на вопрос пользователя, учитывая исходный контент и предыдущий ответ.
+Если исходный контент был картинкой, работай только с уже полученным текстовым результатом, не выдумывай детали изображения.
+Не добавляй факты, которых нет в контексте, если пользователь прямо не просит творчески переформулировать.`
+      },
+      {
+        role: 'user',
+        content: `/no_think
+${originalBlock}Initial action: ${context.action}
+Previous assistant answer:
+${context.lastAnswer || 'No previous answer.'}
+
+Conversation so far:
+${history || 'No previous follow-up messages.'}
+
+User question:
+${question}`
+      }
+    ],
+    temperature: 0.3,
+    max_tokens: 2000,
+    stream: true
+  };
+}
+
 function buildImageTranslationBody({ targetLang, imageUrl }) {
   return {
     model: 'qwen/qwen3.5-9b',
@@ -324,10 +362,11 @@ chrome.runtime.onConnect.addListener((port) => {
       request.action !== 'translate'
       && request.action !== 'explain'
       && request.action !== 'summarize'
+      && request.action !== 'chat'
       && request.action !== 'translateImage'
     ) return;
 
-    const { text, imageUrl, lmPort, targetLang } = request;
+    const { text, imageUrl, question, context, lmPort, targetLang } = request;
 
     try {
       let res;
@@ -343,6 +382,11 @@ chrome.runtime.onConnect.addListener((port) => {
         res = await postChatCompletion({
           lmPort,
           body: buildSummarizeBody({ targetLang, text })
+        });
+      } else if (request.action === 'chat') {
+        res = await postChatCompletion({
+          lmPort,
+          body: buildChatBody({ targetLang, question, context })
         });
       } else {
         res = await postChatCompletion({
