@@ -105,6 +105,14 @@
   white-space: nowrap;
 }
 
+.lt-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.lt-copy,
 .lt-close {
   display: inline-flex;
   align-items: center;
@@ -123,9 +131,26 @@
   transition: background 0.12s, color 0.12s;
 }
 
+.lt-copy:hover,
 .lt-close:hover {
   background: rgba(63, 63, 70, 0.65);
   color: #fafafa;
+}
+
+.lt-copy-check {
+  display: none;
+}
+
+.lt-copy.lt-copied {
+  color: #fafafa;
+}
+
+.lt-copy.lt-copied .lt-copy-icon {
+  display: none;
+}
+
+.lt-copy.lt-copied .lt-copy-check {
+  display: block;
 }
 
 .lt-divider {

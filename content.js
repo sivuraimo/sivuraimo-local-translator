@@ -3,6 +3,7 @@ let translatePopup = null;
 let popupResultEl = null;   // direct reference, not searched by id
 let popupLangEl = null;
 let popupLabelEl = null;
+let copyBtnEl = null;
 let chatEl = null;
 let chatMessagesEl = null;
 let chatInputEl = null;
@@ -15,6 +16,7 @@ let activeStreamId = 0;
 let activePort = null;
 let sessionContext = null;
 let chatHistory = [];
+let lastCopyText = '';
 
 function createButton() {
   const btn = document.createElement('div');
@@ -50,7 +52,13 @@ function createPopup() {
         <span class="lt-label">Translate</span>
         <span class="lt-lang"></span>
       </div>
-      <button class="lt-close">✕</button>
+      <div class="lt-header-actions">
+        <button class="lt-copy" type="button" aria-label="Copy result" title="Copy">
+          <svg class="lt-copy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+          <svg class="lt-copy-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>
+        </button>
+        <button class="lt-close" type="button" aria-label="Close" title="Close">✕</button>
+      </div>
     </div>
     <div class="lt-result"></div>
     <div class="lt-chat" hidden>
@@ -70,10 +78,12 @@ function createPopup() {
   popupLabelEl = popup.querySelector('.lt-label');
   popupLangEl = popup.querySelector('.lt-lang');
   popupResultEl = popup.querySelector('.lt-result');
+  copyBtnEl = popup.querySelector('.lt-copy');
   chatEl = popup.querySelector('.lt-chat');
   chatMessagesEl = popup.querySelector('.lt-chat-messages');
   chatInputEl = popup.querySelector('.lt-chat-input');
   chatSendEl = popup.querySelector('.lt-chat-send');
+  copyBtnEl.addEventListener('click', handleCopyResult);
   popup.querySelector('.lt-close').addEventListener('click', hideAll);
   popup.querySelector('.lt-chat-form').addEventListener('submit', handleChatSubmit);
 
@@ -160,6 +170,8 @@ function clearChat() {
 
 function resetSession() {
   sessionContext = null;
+  lastCopyText = '';
+  setCopyState(false);
   clearChat();
   setChatVisible(false);
 }
@@ -176,6 +188,24 @@ function appendChatMessage(role, text = '') {
 function setChatInputEnabled(enabled) {
   if (chatInputEl) chatInputEl.disabled = !enabled;
   if (chatSendEl) chatSendEl.disabled = !enabled;
+}
+
+function setCopyState(copied) {
+  if (!copyBtnEl) return;
+  copyBtnEl.classList.toggle('lt-copied', copied);
+}
+
+async function handleCopyResult() {
+  const text = lastCopyText || sessionContext?.lastAnswer || popupResultEl?.textContent || '';
+  if (!text.trim()) return;
+
+  try {
+    await navigator.clipboard.writeText(text);
+    setCopyState(true);
+    setTimeout(() => setCopyState(false), 1100);
+  } catch (err) {
+    console.warn('[CS] copy failed:', err.message);
+  }
 }
 
 function getSettings() {
@@ -347,6 +377,7 @@ async function handleTextAction(action) {
       onComplete(answer) {
         if (!sessionContext) return;
         sessionContext.lastAnswer = answer;
+        lastCopyText = answer;
         setChatVisible(true);
         chatInputEl?.focus();
       }
@@ -385,6 +416,7 @@ async function handleImageTranslate(imageUrl) {
       onComplete(answer) {
         if (!sessionContext) return;
         sessionContext.lastAnswer = answer;
+        lastCopyText = answer;
         setChatVisible(true);
         chatInputEl?.focus();
       }
@@ -429,6 +461,7 @@ async function handleChatSubmit(e) {
       onComplete(answer) {
         if (!sessionContext) return;
         sessionContext.lastAnswer = answer;
+        lastCopyText = answer;
         chatHistory.push({ role: 'assistant', content: answer });
       }
     });
