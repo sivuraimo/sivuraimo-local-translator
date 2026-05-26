@@ -2,16 +2,36 @@ let translateBtn = null;
 let translatePopup = null;
 let popupResultEl = null;   // direct reference, not searched by id
 let popupLangEl = null;
+let popupLabelEl = null;
 let currentSelection = '';
 let isStreaming = false;
 let isDraggingPopup = false;
 let lastContextMenuPoint = null;
+let activeStreamId = 0;
+let activePort = null;
 
 function createButton() {
   const btn = document.createElement('div');
   btn.id = 'lt-translate-btn';
-  btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-2"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M22 22l-5-10-5 10"/><path d="M14 18h6"/></svg> Translate`;
-  btn.addEventListener('click', handleTranslate);
+  btn.innerHTML = `
+    <button type="button" class="lt-action-btn" data-action="translate">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-2"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M22 22l-5-10-5 10"/><path d="M14 18h6"/></svg>
+      Translate
+    </button>
+    <button type="button" class="lt-action-btn" data-action="explain">
+      Explain
+    </button>
+  `;
+  btn.addEventListener('click', (e) => {
+    const actionBtn = e.target.closest?.('.lt-action-btn');
+    if (!actionBtn) return;
+
+    if (actionBtn.dataset.action === 'explain') {
+      handleTextAction('explain');
+    } else {
+      handleTextAction('translate');
+    }
+  });
   document.body.appendChild(btn);
   return btn;
 }
@@ -31,6 +51,7 @@ function createPopup() {
   `;
   document.body.appendChild(popup);
   // store direct references — no getElementById on document
+  popupLabelEl = popup.querySelector('.lt-label');
   popupLangEl = popup.querySelector('.lt-lang');
   popupResultEl = popup.querySelector('.lt-result');
   popup.querySelector('.lt-close').addEventListener('click', hideAll);
@@ -90,7 +111,7 @@ function showButton(x, y) {
   translateBtn.style.display = 'flex';
 }
 
-function showPopup(x, y, targetLang) {
+function showPopup(x, y, targetLang, label = 'Translate') {
   if (!translatePopup) translatePopup = createPopup();
 
   const popupWidth = 320;
@@ -100,6 +121,7 @@ function showPopup(x, y, targetLang) {
   translatePopup.style.left = left + 'px';
   translatePopup.style.top = Math.max(popupMargin, y) + 'px';
   translatePopup.style.display = 'block';
+  popupLabelEl.textContent = label;
   popupLangEl.textContent = targetLang;
 }
 
@@ -107,17 +129,38 @@ function hideAll() {
   if (translateBtn) translateBtn.style.display = 'none';
   if (translatePopup) translatePopup.style.display = 'none';
   isStreaming = false;
+  activeStreamId++;
+  disconnectActivePort();
+}
+
+function disconnectActivePort() {
+  if (!activePort) return;
+
+  try {
+    activePort.disconnect();
+  } catch (err) {
+    console.warn('[CS] port disconnect failed:', err.message);
+  }
+
+  activePort = null;
 }
 
 function streamTranslation(payload) {
+  activeStreamId++;
+  const streamId = activeStreamId;
+  disconnectActivePort();
+
   isStreaming = true;
   showLoading();
 
   try {
     const port = chrome.runtime.connect({ name: 'translator' });
+    activePort = port;
     let accumulated = '';
 
     port.onMessage.addListener((msg) => {
+      if (streamId !== activeStreamId) return;
+
       console.log('[CS] port msg:', msg.action, msg.text ?? msg.error ?? '');
       if (msg.action === 'chunk' && isStreaming) {
         accumulated += msg.text;
@@ -126,17 +169,22 @@ function streamTranslation(payload) {
       } else if (msg.action === 'done') {
         console.log('[CS] done. final translation:', accumulated);
         isStreaming = false;
+        activePort = null;
         if (!accumulated.trim()) {
           showError('Empty model response');
         }
       } else if (msg.action === 'error') {
         isStreaming = false;
+        activePort = null;
         showError(msg.error || 'Unknown error');
       }
     });
 
     port.onDisconnect.addListener(() => {
+      if (streamId !== activeStreamId) return;
+
       const err = chrome.runtime.lastError?.message;
+      activePort = null;
       if (isStreaming) {
         isStreaming = false;
         if (!accumulated.trim()) {
@@ -147,7 +195,10 @@ function streamTranslation(payload) {
 
     port.postMessage(payload);
   } catch (err) {
+    if (streamId !== activeStreamId) return;
+
     isStreaming = false;
+    activePort = null;
     if (err.message?.includes('Extension context invalidated')) {
       showError('Extension was updated. Reload the page.');
     } else {
@@ -156,7 +207,7 @@ function streamTranslation(payload) {
   }
 }
 
-async function handleTranslate() {
+async function handleTextAction(action) {
   if (!currentSelection) return;
 
   const btnLeft = parseInt(translateBtn.style.left);
@@ -164,10 +215,10 @@ async function handleTranslate() {
   translateBtn.style.display = 'none';
 
   const settings = await chrome.storage.sync.get({ port: '1234', targetLang: 'русский' });
-  showPopup(btnLeft, btnTop, settings.targetLang);
+  showPopup(btnLeft, btnTop, settings.targetLang, action === 'explain' ? 'Explain' : 'Translate');
 
   streamTranslation({
-    action: 'translate',
+    action,
     text: currentSelection,
     lmPort: settings.port,
     targetLang: settings.targetLang
@@ -182,7 +233,7 @@ async function handleImageTranslate(imageUrl) {
   };
 
   if (translateBtn) translateBtn.style.display = 'none';
-  showPopup(point.x, point.y, settings.targetLang);
+  showPopup(point.x, point.y, settings.targetLang, 'Translate');
 
   streamTranslation({
     action: 'translateImage',
@@ -203,7 +254,7 @@ document.addEventListener('mouseup', (e) => {
   if (isDraggingPopup) return;
 
   setTimeout(() => {
-    // Clicking the translate button — let handleTranslate manage state
+    // Clicking the action bar — let the button handlers manage state
     if (e.target.id === 'lt-translate-btn' || e.target.closest?.('#lt-translate-btn')) return;
 
     const selection = window.getSelection();
@@ -212,6 +263,8 @@ document.addEventListener('mouseup', (e) => {
     if (text && text.length > 2) {
       currentSelection = text;
       isStreaming = false;
+      activeStreamId++;
+      disconnectActivePort();
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
       showButton(rect.left + rect.width / 2 - 50, rect.top);

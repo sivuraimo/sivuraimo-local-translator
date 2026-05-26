@@ -160,6 +160,30 @@ function buildTranslationBody({ targetLang, text }) {
   };
 }
 
+function buildExplainBody({ targetLang, text }) {
+  return {
+    model: 'qwen/qwen3.5-9b',
+    messages: [
+      {
+        role: 'system',
+        content: `Ты объясняешь выделенный пользователем текст на ${targetLang}.
+Пиши простыми словами и не переводи дословно.
+Если текст короткий или простой — отвечай кратко одним абзацем.
+Если текст сложный — дай структурированное объяснение:
+- Коротко: главная мысль.
+- Что это значит: смысл простыми словами.
+- Термины: поясни только реально важные термины, если они есть.
+- Важный нюанс: укажи условие, риск, ограничение или скрытый смысл, если он есть.
+Не выдумывай факты вне данного текста. Не используй markdown-таблицы.`
+      },
+      { role: 'user', content: '/no_think\nОбъясни этот текст:\n\n' + text }
+    ],
+    temperature: 0.3,
+    max_tokens: 2000,
+    stream: true
+  };
+}
+
 function buildImageTranslationBody({ targetLang, imageUrl }) {
   return {
     model: 'qwen/qwen3.5-9b',
@@ -203,6 +227,16 @@ async function postImageChatCompletion({ lmPort, targetLang, imageUrl }) {
   throw lastError;
 }
 
+function safePostMessage(port, message) {
+  try {
+    port.postMessage(message);
+    return true;
+  } catch (err) {
+    console.warn('[Translator] unable to post message:', err.message);
+    return false;
+  }
+}
+
 async function streamCompletion({ port, response }) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -222,7 +256,7 @@ async function streamCompletion({ port, response }) {
       if (!trimmed.startsWith('data: ')) continue;
       const data = trimmed.slice(6);
       if (data === '[DONE]') {
-        port.postMessage({ action: 'done' });
+        safePostMessage(port, { action: 'done' });
         return;
       }
       try {
@@ -233,13 +267,13 @@ async function streamCompletion({ port, response }) {
         if (chunk) {
           chunkCount++;
           console.log('[BG] chunk #' + chunkCount + ':', chunk);
-          port.postMessage({ action: 'chunk', text: chunk });
+          if (!safePostMessage(port, { action: 'chunk', text: chunk })) return;
         }
       } catch (e) { /* skip malformed SSE line */ }
     }
   }
 
-  port.postMessage({ action: 'done' });
+  safePostMessage(port, { action: 'done' });
 }
 
 // Long-lived port connection for streaming translation back to content script
@@ -248,7 +282,7 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'translator') return;
 
   port.onMessage.addListener(async (request) => {
-    if (request.action !== 'translate' && request.action !== 'translateImage') return;
+    if (request.action !== 'translate' && request.action !== 'explain' && request.action !== 'translateImage') return;
 
     const { text, imageUrl, lmPort, targetLang } = request;
 
@@ -257,6 +291,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
       if (request.action === 'translateImage') {
         res = await postImageChatCompletion({ lmPort, targetLang, imageUrl });
+      } else if (request.action === 'explain') {
+        res = await postChatCompletion({
+          lmPort,
+          body: buildExplainBody({ targetLang, text })
+        });
       } else {
         res = await postChatCompletion({
           lmPort,
@@ -267,7 +306,7 @@ chrome.runtime.onConnect.addListener((port) => {
       await streamCompletion({ port, response: res });
     } catch (err) {
       console.error('[Translator] error:', err.message);
-      port.postMessage({ action: 'error', error: normalizeErrorMessage(err) });
+      safePostMessage(port, { action: 'error', error: normalizeErrorMessage(err) });
     }
   });
 });
