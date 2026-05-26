@@ -5,6 +5,7 @@ let popupLangEl = null;
 let currentSelection = '';
 let isStreaming = false;
 let isDraggingPopup = false;
+let lastContextMenuPoint = null;
 
 function createButton() {
   const btn = document.createElement('div');
@@ -72,11 +73,34 @@ function showLoading() {
   }
 }
 
+function showError(message) {
+  if (!popupResultEl) return;
+
+  popupResultEl.textContent = '';
+  const errorEl = document.createElement('span');
+  errorEl.className = 'lt-error';
+  errorEl.textContent = message;
+  popupResultEl.appendChild(errorEl);
+}
+
 function showButton(x, y) {
   if (!translateBtn) translateBtn = createButton();
   translateBtn.style.left = x + 'px';
   translateBtn.style.top = Math.max(10, y - 44) + 'px';
   translateBtn.style.display = 'flex';
+}
+
+function showPopup(x, y, targetLang) {
+  if (!translatePopup) translatePopup = createPopup();
+
+  const popupWidth = 320;
+  const popupMargin = 10;
+  const left = Math.min(Math.max(x, popupMargin), window.innerWidth - popupWidth - popupMargin);
+
+  translatePopup.style.left = left + 'px';
+  translatePopup.style.top = Math.max(popupMargin, y) + 'px';
+  translatePopup.style.display = 'block';
+  popupLangEl.textContent = targetLang;
 }
 
 function hideAll() {
@@ -85,25 +109,7 @@ function hideAll() {
   isStreaming = false;
 }
 
-async function handleTranslate() {
-  if (!currentSelection) return;
-
-  const btnLeft = parseInt(translateBtn.style.left);
-  const btnTop = parseInt(translateBtn.style.top);
-  translateBtn.style.display = 'none';
-
-  if (!translatePopup) translatePopup = createPopup();
-  const settings = await chrome.storage.sync.get({ port: '1234', targetLang: 'русский' });
-
-  const popupWidth = 320;
-  const vw = window.innerWidth;
-  let left = Math.min(Math.max(btnLeft, 10), vw - popupWidth - 10);
-
-  translatePopup.style.left = left + 'px';
-  translatePopup.style.top = btnTop + 'px';
-  translatePopup.style.display = 'block';
-  popupLangEl.textContent = settings.targetLang;
-
+function streamTranslation(payload) {
   isStreaming = true;
   showLoading();
 
@@ -121,15 +127,11 @@ async function handleTranslate() {
         console.log('[CS] done. final translation:', accumulated);
         isStreaming = false;
         if (!accumulated.trim()) {
-          popupResultEl.innerHTML = '<span class="lt-error">Пустой ответ от модели</span>';
+          showError('Empty model response');
         }
       } else if (msg.action === 'error') {
         isStreaming = false;
-        if (msg.error?.includes('Failed to fetch')) {
-          popupResultEl.innerHTML = '<span class="lt-error">LM Studio не запущен. Проверь Local Server.</span>';
-        } else {
-          popupResultEl.innerHTML = '<span class="lt-error">Ошибка: ' + (msg.error || 'неизвестно') + '</span>';
-        }
+        showError(msg.error || 'Unknown error');
       }
     });
 
@@ -138,27 +140,64 @@ async function handleTranslate() {
       if (isStreaming) {
         isStreaming = false;
         if (!accumulated.trim()) {
-          popupResultEl.innerHTML = '<span class="lt-error">Ошибка: ' + (err || 'соединение разорвано') + '</span>';
+          showError(err || 'Connection closed');
         }
       }
     });
 
-    port.postMessage({
-      action: 'translate',
-      text: currentSelection,
-      lmPort: settings.port,
-      targetLang: settings.targetLang
-    });
-
+    port.postMessage(payload);
   } catch (err) {
     isStreaming = false;
     if (err.message?.includes('Extension context invalidated')) {
-      popupResultEl.innerHTML = '<span class="lt-error">Расширение обновилось — перезагрузи страницу (F5)</span>';
+      showError('Extension was updated. Reload the page.');
     } else {
-      popupResultEl.innerHTML = '<span class="lt-error">Ошибка: ' + err.message + '</span>';
+      showError(err.message);
     }
   }
 }
+
+async function handleTranslate() {
+  if (!currentSelection) return;
+
+  const btnLeft = parseInt(translateBtn.style.left);
+  const btnTop = parseInt(translateBtn.style.top);
+  translateBtn.style.display = 'none';
+
+  const settings = await chrome.storage.sync.get({ port: '1234', targetLang: 'русский' });
+  showPopup(btnLeft, btnTop, settings.targetLang);
+
+  streamTranslation({
+    action: 'translate',
+    text: currentSelection,
+    lmPort: settings.port,
+    targetLang: settings.targetLang
+  });
+}
+
+async function handleImageTranslate(imageUrl) {
+  const settings = await chrome.storage.sync.get({ port: '1234', targetLang: 'русский' });
+  const point = lastContextMenuPoint || {
+    x: Math.round(window.innerWidth / 2 - 160),
+    y: Math.round(window.innerHeight / 3)
+  };
+
+  if (translateBtn) translateBtn.style.display = 'none';
+  showPopup(point.x, point.y, settings.targetLang);
+
+  streamTranslation({
+    action: 'translateImage',
+    imageUrl,
+    lmPort: settings.port,
+    targetLang: settings.targetLang
+  });
+}
+
+document.addEventListener('contextmenu', (e) => {
+  const image = e.target.closest?.('img');
+  if (!image) return;
+
+  lastContextMenuPoint = { x: e.clientX, y: e.clientY };
+});
 
 document.addEventListener('mouseup', (e) => {
   if (isDraggingPopup) return;
@@ -193,3 +232,8 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('scroll', () => {
   if (translateBtn) translateBtn.style.display = 'none';
 }, { passive: true });
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.action !== 'translateImageFromContextMenu' || !message.srcUrl) return;
+  handleImageTranslate(message.srcUrl);
+});
