@@ -31,12 +31,16 @@
   position: fixed;
   z-index: 2147483646;
   display: none;
-  width: 300px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.15), 0 1px 4px rgba(0,0,0,0.08);
+  width: 320px;
+  background: rgba(9, 9, 11, 0.94);
+  border: 1px solid rgba(63, 63, 70, 0.8);
+  border-radius: 10px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.36), 0 2px 10px rgba(0,0,0,0.25);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   overflow: hidden;
+  color: #fafafa;
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
   animation: lt-fade-in 0.15s ease;
 }
 
@@ -50,8 +54,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px 14px;
-  background: #1a1a1a;
+  padding: 11px 12px 10px 14px;
+  background: rgba(24, 24, 27, 0.72);
+  border-bottom: 1px solid rgba(39, 39, 42, 0.95);
   cursor: grab;
   user-select: none;
 }
@@ -68,15 +73,16 @@
 }
 
 .lt-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  color: #aaa;
+  letter-spacing: 0;
+  color: #fafafa;
 }
 
 .lt-lang {
   min-width: 0;
-  color: #666;
+  max-width: 130px;
+  color: #a1a1aa;
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -84,19 +90,26 @@
 }
 
 .lt-close {
-  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
   border: none;
+  border-radius: 6px;
   flex-shrink: 0;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
   padding: 0;
   line-height: 1;
-  color: #aaa;
-  transition: color 0.1s;
+  color: #a1a1aa;
+  transition: background 0.12s, color 0.12s;
 }
 
 .lt-close:hover {
-  color: #fff;
+  background: rgba(63, 63, 70, 0.65);
+  color: #fafafa;
 }
 
 .lt-divider {
@@ -104,13 +117,14 @@
 }
 
 .lt-result {
-  padding: 12px 14px;
+  padding: 14px;
   font-size: 14px;
-  color: #1a1a1a;
+  color: #e4e4e7;
   line-height: 1.6;
-  min-height: 44px;
+  min-height: 52px;
   max-height: 260px;
   overflow-y: auto;
+  scrollbar-color: rgba(113, 113, 122, 0.8) transparent;
 }
 
 .lt-result:has(.lt-loading) {
@@ -127,7 +141,7 @@
 .lt-dot {
   width: 6px;
   height: 6px;
-  background: #ccc;
+  background: #a1a1aa;
   border-radius: 50%;
   animation: lt-bounce 1.2s ease-in-out infinite;
 }
@@ -142,6 +156,6 @@
 
 .lt-error {
   font-size: 12px;
-  color: #e53e3e;
+  color: #f87171;
   line-height: 1.5;
 }
