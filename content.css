@@ -49,7 +49,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px 8px;
+  gap: 10px;
+  padding: 10px 14px;
   background: #1a1a1a;
   cursor: grab;
   user-select: none;
@@ -59,19 +60,33 @@
   cursor: grabbing;
 }
 
+.lt-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
 .lt-label {
   font-size: 11px;
   font-weight: 600;
-  color: #888;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #aaa;
+}
+
+.lt-lang {
+  min-width: 0;
+  color: #666;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lt-close {
   background: none;
   border: none;
-  color: #666;
+  flex-shrink: 0;
   cursor: pointer;
   font-size: 12px;
   padding: 0;
@@ -82,17 +97,6 @@
 
 .lt-close:hover {
   color: #fff;
-}
-
-.lt-original {
-  padding: 10px 14px;
-  font-size: 12px;
-  color: #888;
-  line-height: 1.5;
-  background: #f8f8f8;
-  border-bottom: 1px solid #eee;
-  max-height: 60px;
-  overflow: hidden;
 }
 
 .lt-divider {

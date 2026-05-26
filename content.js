@@ -1,7 +1,7 @@
 let translateBtn = null;
 let translatePopup = null;
 let popupResultEl = null;   // direct reference, not searched by id
-let popupOriginalEl = null;
+let popupLangEl = null;
 let currentSelection = '';
 let isStreaming = false;
 let isDraggingPopup = false;
@@ -20,15 +20,17 @@ function createPopup() {
   popup.id = 'lt-popup';
   popup.innerHTML = `
     <div class="lt-header">
-      <span class="lt-label">Перевод</span>
+      <div class="lt-title">
+        <span class="lt-label">Translate</span>
+        <span class="lt-lang"></span>
+      </div>
       <button class="lt-close">✕</button>
     </div>
-    <div class="lt-original"></div>
     <div class="lt-result"></div>
   `;
   document.body.appendChild(popup);
   // store direct references — no getElementById on document
-  popupOriginalEl = popup.querySelector('.lt-original');
+  popupLangEl = popup.querySelector('.lt-lang');
   popupResultEl = popup.querySelector('.lt-result');
   popup.querySelector('.lt-close').addEventListener('click', hideAll);
 
@@ -91,6 +93,7 @@ async function handleTranslate() {
   translateBtn.style.display = 'none';
 
   if (!translatePopup) translatePopup = createPopup();
+  const settings = await chrome.storage.sync.get({ port: '1234', targetLang: 'русский' });
 
   const popupWidth = 300;
   const vw = window.innerWidth;
@@ -99,15 +102,10 @@ async function handleTranslate() {
   translatePopup.style.left = left + 'px';
   translatePopup.style.top = btnTop + 'px';
   translatePopup.style.display = 'block';
-
-  popupOriginalEl.textContent = currentSelection.length > 120
-    ? currentSelection.slice(0, 120) + '…'
-    : currentSelection;
+  popupLangEl.textContent = settings.targetLang;
 
   isStreaming = true;
   showLoading();
-
-  const settings = await chrome.storage.sync.get({ port: '1234', targetLang: 'русский' });
 
   try {
     const port = chrome.runtime.connect({ name: 'translator' });
