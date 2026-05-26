@@ -3,7 +3,10 @@ let translatePopup = null;
 let popupResultEl = null;   // direct reference, not searched by id
 let popupLangEl = null;
 let popupLabelEl = null;
-let copyBtnEl = null;
+let exportBtnEl = null;
+let exportMenuEl = null;
+let mainCopyBtnEl = null;
+let stopBtnEl = null;
 let chatEl = null;
 let chatMessagesEl = null;
 let chatInputEl = null;
@@ -14,6 +17,7 @@ let isDraggingPopup = false;
 let lastContextMenuPoint = null;
 let activeStreamId = 0;
 let activePort = null;
+let activeTargetEl = null;
 let sessionContext = null;
 let chatHistory = [];
 let lastCopyText = '';
@@ -53,14 +57,25 @@ function createPopup() {
         <span class="lt-lang"></span>
       </div>
       <div class="lt-header-actions">
-        <button class="lt-copy" type="button" aria-label="Copy result" title="Copy">
-          <svg class="lt-copy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
-          <svg class="lt-copy-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>
-        </button>
+        <div class="lt-export-wrap">
+          <button class="lt-export" type="button" aria-label="Export result" title="Export">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+          </button>
+          <div class="lt-export-menu" hidden>
+            <button type="button" data-export-action="copy">Copy</button>
+            <button type="button" data-export-action="save">Save .md</button>
+          </div>
+        </div>
         <button class="lt-close" type="button" aria-label="Close" title="Close">✕</button>
       </div>
     </div>
-    <div class="lt-result"></div>
+    <div class="lt-result-wrap">
+      <button class="lt-answer-copy lt-main-copy" type="button" aria-label="Copy answer" title="Copy answer" hidden>
+        <svg class="lt-copy-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+        <svg class="lt-copy-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>
+      </button>
+      <div class="lt-result"></div>
+    </div>
     <div class="lt-chat" hidden>
       <div class="lt-chat-messages"></div>
       <form class="lt-chat-form">
@@ -68,6 +83,9 @@ function createPopup() {
           <input class="lt-chat-input" type="text" placeholder="Ask follow-up..." autocomplete="off">
           <button class="lt-chat-send" type="submit" aria-label="Send message" title="Send">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+          </button>
+          <button class="lt-stop" type="button" aria-label="Stop generation" title="Stop" hidden>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </button>
         </div>
       </form>
@@ -78,12 +96,18 @@ function createPopup() {
   popupLabelEl = popup.querySelector('.lt-label');
   popupLangEl = popup.querySelector('.lt-lang');
   popupResultEl = popup.querySelector('.lt-result');
-  copyBtnEl = popup.querySelector('.lt-copy');
+  exportBtnEl = popup.querySelector('.lt-export');
+  exportMenuEl = popup.querySelector('.lt-export-menu');
+  mainCopyBtnEl = popup.querySelector('.lt-main-copy');
+  stopBtnEl = popup.querySelector('.lt-stop');
   chatEl = popup.querySelector('.lt-chat');
   chatMessagesEl = popup.querySelector('.lt-chat-messages');
   chatInputEl = popup.querySelector('.lt-chat-input');
   chatSendEl = popup.querySelector('.lt-chat-send');
-  copyBtnEl.addEventListener('click', handleCopyResult);
+  stopBtnEl.addEventListener('click', stopGeneration);
+  exportBtnEl.addEventListener('click', toggleExportMenu);
+  exportMenuEl.addEventListener('click', handleExportMenuClick);
+  mainCopyBtnEl.addEventListener('click', () => copyAnswer(mainCopyBtnEl, popupResultEl.textContent));
   popup.querySelector('.lt-close').addEventListener('click', hideAll);
   popup.querySelector('.lt-chat-form').addEventListener('submit', handleChatSubmit);
 
@@ -92,7 +116,7 @@ function createPopup() {
   let dragging = false, dragOffsetX = 0, dragOffsetY = 0;
 
   header.addEventListener('mousedown', (e) => {
-    if (e.target.classList.contains('lt-close')) return;
+    if (e.target.closest('.lt-header-actions')) return;
     dragging = true;
     isDraggingPopup = true;
     const rect = popup.getBoundingClientRect();
@@ -171,7 +195,9 @@ function clearChat() {
 function resetSession() {
   sessionContext = null;
   lastCopyText = '';
-  setCopyState(false);
+  setExportMenuVisible(false);
+  setButtonCopied(mainCopyBtnEl, false);
+  if (mainCopyBtnEl) mainCopyBtnEl.hidden = true;
   clearChat();
   setChatVisible(false);
 }
@@ -179,10 +205,20 @@ function resetSession() {
 function appendChatMessage(role, text = '') {
   const messageEl = document.createElement('div');
   messageEl.className = `lt-chat-message lt-chat-message-${role}`;
-  messageEl.textContent = text;
+  const contentEl = document.createElement('div');
+  contentEl.className = 'lt-chat-message-content';
+  contentEl.textContent = text;
+  messageEl.appendChild(contentEl);
+
+  if (role === 'assistant') {
+    const copyButton = createAnswerCopyButton();
+    copyButton.addEventListener('click', () => copyAnswer(copyButton, contentEl.textContent));
+    messageEl.appendChild(copyButton);
+  }
+
   chatMessagesEl.appendChild(messageEl);
   chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
-  return messageEl;
+  return contentEl;
 }
 
 function setChatInputEnabled(enabled) {
@@ -190,22 +226,100 @@ function setChatInputEnabled(enabled) {
   if (chatSendEl) chatSendEl.disabled = !enabled;
 }
 
-function setCopyState(copied) {
-  if (!copyBtnEl) return;
-  copyBtnEl.classList.toggle('lt-copied', copied);
+function setStopVisible(visible) {
+  if (!stopBtnEl) return;
+  stopBtnEl.hidden = !visible;
+  if (chatSendEl) chatSendEl.hidden = visible;
 }
 
-async function handleCopyResult() {
-  const text = lastCopyText || sessionContext?.lastAnswer || popupResultEl?.textContent || '';
-  if (!text.trim()) return;
+function stopGeneration() {
+  if (!isStreaming) return;
 
+  isStreaming = false;
+  activeStreamId++;
+  disconnectActivePort();
+  setStopVisible(false);
+  setChatInputEnabled(true);
+  if (activeTargetEl === popupResultEl && popupResultEl?.textContent.trim() && mainCopyBtnEl) {
+    mainCopyBtnEl.hidden = false;
+  }
+  activeTargetEl = null;
+}
+
+function createAnswerCopyButton() {
+  const button = document.createElement('button');
+  button.className = 'lt-answer-copy';
+  button.type = 'button';
+  button.title = 'Copy answer';
+  button.setAttribute('aria-label', 'Copy answer');
+  button.innerHTML = `
+    <svg class="lt-copy-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+    <svg class="lt-copy-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>
+  `;
+  return button;
+}
+
+function setButtonCopied(button, copied) {
+  if (!button) return;
+  button.classList.toggle('lt-copied', copied);
+}
+
+async function copyText(text) {
+  if (!text.trim()) return;
+  await navigator.clipboard.writeText(text);
+}
+
+async function copyAnswer(button, text) {
   try {
-    await navigator.clipboard.writeText(text);
-    setCopyState(true);
-    setTimeout(() => setCopyState(false), 1100);
+    await copyText(text);
+    setButtonCopied(button, true);
+    setTimeout(() => setButtonCopied(button, false), 1100);
   } catch (err) {
     console.warn('[CS] copy failed:', err.message);
   }
+}
+
+function setExportMenuVisible(visible) {
+  if (!exportMenuEl) return;
+  exportMenuEl.hidden = !visible;
+}
+
+function toggleExportMenu() {
+  setExportMenuVisible(exportMenuEl.hidden);
+}
+
+async function handleExportMenuClick(e) {
+  const actionButton = e.target.closest('button[data-export-action]');
+  if (!actionButton) return;
+
+  const text = lastCopyText || sessionContext?.lastAnswer || popupResultEl?.textContent || '';
+  if (!text.trim()) return;
+
+  setExportMenuVisible(false);
+
+  if (actionButton.dataset.exportAction === 'save') {
+    saveMarkdown(text);
+    return;
+  }
+
+  try {
+    await copyText(text);
+  } catch (err) {
+    console.warn('[CS] export copy failed:', err.message);
+  }
+}
+
+function saveMarkdown(text) {
+  const title = popupLabelEl?.textContent || 'Result';
+  const lang = popupLangEl?.textContent || '';
+  const markdown = `# ${title}${lang ? ` (${lang})` : ''}\n\n${text.trim()}\n`;
+  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `local-translator-${Date.now()}.md`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function getSettings() {
@@ -252,9 +366,12 @@ function hideAll() {
   if (translateBtn) translateBtn.style.display = 'none';
   if (translatePopup) translatePopup.style.display = 'none';
   if (popupResultEl) popupResultEl.textContent = '';
+  if (mainCopyBtnEl) mainCopyBtnEl.hidden = true;
   isStreaming = false;
+  setStopVisible(false);
   activeStreamId++;
   disconnectActivePort();
+  activeTargetEl = null;
   resetSession();
 }
 
@@ -275,9 +392,12 @@ function streamTranslation(payload, options = {}) {
   const streamId = activeStreamId;
   disconnectActivePort();
   const targetEl = options.targetEl || popupResultEl;
+  activeTargetEl = targetEl;
 
   isStreaming = true;
+  setStopVisible(true);
   setChatInputEnabled(false);
+  if (targetEl === popupResultEl && mainCopyBtnEl) mainCopyBtnEl.hidden = true;
   showLoading(targetEl);
 
   try {
@@ -291,6 +411,7 @@ function streamTranslation(payload, options = {}) {
       console.log('[CS] port msg:', msg.action, msg.text ?? msg.error ?? '');
       if (msg.action === 'chunk' && isStreaming) {
         accumulated += msg.text;
+        lastCopyText = accumulated;
         console.log('[CS] accumulated so far:', accumulated);
         targetEl.textContent = accumulated;
         if (chatMessagesEl?.contains(targetEl)) {
@@ -300,15 +421,25 @@ function streamTranslation(payload, options = {}) {
         console.log('[CS] done. final translation:', accumulated);
         isStreaming = false;
         activePort = null;
+        activeTargetEl = null;
+        setStopVisible(false);
         setChatInputEnabled(true);
         if (!accumulated.trim()) {
           showError('Empty model response', targetEl);
-        } else if (options.onComplete) {
-          options.onComplete(accumulated);
+        } else {
+          if (targetEl === popupResultEl && mainCopyBtnEl) {
+            mainCopyBtnEl.hidden = false;
+            lastCopyText = accumulated;
+          }
+          if (options.onComplete) {
+            options.onComplete(accumulated);
+          }
         }
       } else if (msg.action === 'error') {
         isStreaming = false;
         activePort = null;
+        activeTargetEl = null;
+        setStopVisible(false);
         setChatInputEnabled(true);
         showError(msg.error || 'Unknown error', targetEl);
       }
@@ -319,8 +450,10 @@ function streamTranslation(payload, options = {}) {
 
       const err = chrome.runtime.lastError?.message;
       activePort = null;
+      activeTargetEl = null;
       if (isStreaming) {
         isStreaming = false;
+        setStopVisible(false);
         setChatInputEnabled(true);
         if (!accumulated.trim()) {
           showError(err || 'Connection closed', targetEl);
@@ -334,6 +467,8 @@ function streamTranslation(payload, options = {}) {
 
     isStreaming = false;
     activePort = null;
+    activeTargetEl = null;
+    setStopVisible(false);
     setChatInputEnabled(true);
     if (err.message?.includes('Extension context invalidated')) {
       showError('Extension was updated. Reload the page.', targetEl);
@@ -490,6 +625,7 @@ document.addEventListener('mouseup', (e) => {
     if (text && text.length > 2) {
       currentSelection = text;
       isStreaming = false;
+      setStopVisible(false);
       activeStreamId++;
       disconnectActivePort();
       resetSession();

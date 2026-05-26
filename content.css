@@ -112,7 +112,12 @@
   flex-shrink: 0;
 }
 
-.lt-copy,
+.lt-export-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.lt-export,
 .lt-close {
   display: inline-flex;
   align-items: center;
@@ -131,9 +136,46 @@
   transition: background 0.12s, color 0.12s;
 }
 
-.lt-copy:hover,
+.lt-export:hover,
 .lt-close:hover {
   background: rgba(63, 63, 70, 0.65);
+  color: #fafafa;
+}
+
+.lt-export-menu {
+  position: absolute;
+  top: 26px;
+  right: 0;
+  z-index: 1;
+  min-width: 104px;
+  padding: 4px;
+  background: rgba(9, 9, 11, 0.98);
+  border: 1px solid rgba(63, 63, 70, 0.72);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.28);
+}
+
+.lt-export-menu[hidden] {
+  display: none;
+}
+
+.lt-export-menu button {
+  display: block;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #d4d4d8;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.lt-export-menu button:hover {
+  background: rgba(63, 63, 70, 0.58);
   color: #fafafa;
 }
 
@@ -141,16 +183,59 @@
   display: none;
 }
 
-.lt-copy.lt-copied {
+.lt-result-wrap {
+  position: relative;
+}
+
+.lt-answer-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #71717a;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
+}
+
+.lt-answer-copy:hover {
+  background: rgba(63, 63, 70, 0.55);
   color: #fafafa;
 }
 
-.lt-copy.lt-copied .lt-copy-icon {
+.lt-answer-copy[hidden] {
   display: none;
 }
 
-.lt-copy.lt-copied .lt-copy-check {
+.lt-answer-copy.lt-copied {
+  color: #fafafa;
+}
+
+.lt-answer-copy.lt-copied .lt-copy-icon {
+  display: none;
+}
+
+.lt-answer-copy.lt-copied .lt-copy-check {
   display: block;
+}
+
+.lt-main-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lt-result-wrap:hover .lt-main-copy,
+.lt-main-copy.lt-copied {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .lt-divider {
@@ -159,6 +244,7 @@
 
 .lt-result {
   padding: 14px;
+  padding-right: 38px;
   font-size: 14px;
   color: #e4e4e7;
   line-height: 1.6;
@@ -188,6 +274,7 @@
 }
 
 .lt-chat-message {
+  position: relative;
   max-width: 100%;
   padding: 0;
   border-radius: 0;
@@ -209,6 +296,22 @@
   background: transparent;
   color: #e4e4e7;
   border: none;
+  padding-right: 28px;
+}
+
+.lt-chat-message-assistant .lt-answer-copy {
+  position: absolute;
+  top: -3px;
+  right: 0;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lt-chat-message-assistant:hover .lt-answer-copy,
+.lt-chat-message-assistant .lt-answer-copy.lt-copied {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .lt-chat-form {
@@ -251,7 +354,8 @@
   color: #71717a;
 }
 
-.lt-chat-send {
+.lt-chat-send,
+.lt-stop {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -266,14 +370,25 @@
   transition: background 0.12s, color 0.12s;
 }
 
-.lt-chat-send:hover {
+.lt-chat-send[hidden],
+.lt-stop[hidden] {
+  display: none;
+}
+
+.lt-chat-send:hover,
+.lt-stop:hover {
   background: rgba(63, 63, 70, 0.55);
   color: #fafafa;
 }
 
-.lt-chat-send:disabled {
+.lt-chat-send:disabled,
+.lt-stop:disabled {
   cursor: default;
   opacity: 0.38;
+}
+
+.lt-stop {
+  color: #d4d4d8;
 }
 
 .lt-result:has(.lt-loading) {
