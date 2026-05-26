@@ -3,7 +3,7 @@
   "name": "Local Translator",
   "version": "1.0",
   "description": "Переводи выделенный текст через локальную модель LM Studio",
-  "permissions": ["activeTab", "contextMenus", "scripting", "storage"],
+  "permissions": ["activeTab", "contextMenus", "scripting", "storage", "tabs"],
   "host_permissions": ["<all_urls>", "http://localhost/*", "http://127.0.0.1/*"],
   "background": {
     "service_worker": "background.js"

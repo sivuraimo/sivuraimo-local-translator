@@ -43,6 +43,23 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'captureAreaImage') {
+    (async () => {
+      try {
+        const imageUrl = await captureVisibleAreaImage({
+          windowId: sender?.tab?.windowId,
+          rect: message.rect,
+          devicePixelRatio: message.devicePixelRatio
+        });
+        sendResponse({ imageUrl });
+      } catch (err) {
+        sendResponse({ error: normalizeErrorMessage(err) });
+      }
+    })();
+
+    return true;
+  }
+
   if (message.action !== 'getSettings') return false;
 
   chrome.storage.sync.get({ port: '1234', targetLang: 'русский' }, (settings) => {
@@ -145,6 +162,38 @@ async function imageUrlToPayloads(srcUrl) {
   return [...new Set(payloads)];
 }
 
+async function cropDataUrlToPngDataUrl(dataUrl, rect, devicePixelRatio = 1) {
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  const bitmap = await createImageBitmap(blob);
+
+  const scale = devicePixelRatio || 1;
+  const cropX = Math.max(0, Math.round(rect.left * scale));
+  const cropY = Math.max(0, Math.round(rect.top * scale));
+  const cropWidth = Math.max(1, Math.round(rect.width * scale));
+  const cropHeight = Math.max(1, Math.round(rect.height * scale));
+  const width = Math.max(1, Math.min(cropWidth, bitmap.width - cropX));
+  const height = Math.max(1, Math.min(cropHeight, bitmap.height - cropY));
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  ctx.drawImage(bitmap, cropX, cropY, width, height, 0, 0, width, height);
+  bitmap.close();
+
+  const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
+  return blobToDataUrl(pngBlob, 'image/png');
+}
+
+async function captureVisibleAreaImage({ port, windowId, rect, devicePixelRatio }) {
+  windowId = windowId ?? port?.sender?.tab?.windowId;
+  if (windowId == null) {
+    throw new Error('Unable to determine the active window for capture.');
+  }
+
+  const screenshot = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+  return cropDataUrlToPngDataUrl(screenshot, rect, devicePixelRatio);
+}
+
 async function postChatCompletion({ lmPort, body }) {
   const res = await fetch(`http://127.0.0.1:${lmPort}/v1/chat/completions`, {
     method: 'POST',
@@ -222,13 +271,48 @@ function buildSummarizeBody({ targetLang, text }) {
   };
 }
 
+function buildCaptureAreaBody({ imageUrl, prompt, targetLang }) {
+  const userPrompt = prompt?.trim();
+  const instruction = userPrompt || 'Extract the visible text from this screenshot.';
+
+  return {
+    model: 'qwen/qwen3.5-9b',
+    messages: [
+      {
+        role: 'system',
+        content: userPrompt
+          ? `You analyze the selected screenshot and answer the user's request in ${targetLang}.
+Base the answer only on visible screenshot content.
+If a fragment is unreadable, mark it as [unclear].
+If the request cannot be answered from the screenshot, say so briefly.`
+          : `Extract all readable text from this screenshot.
+Preserve line breaks, columns, labels, bullet points and simple structure.
+Do not translate or explain.
+If a fragment is unreadable, mark it as [unclear].
+If there is no readable text, say so briefly.`
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: `/no_think\n${instruction}` },
+          { type: 'image_url', image_url: { url: imageUrl } }
+        ]
+      }
+    ],
+    temperature: 0.3,
+    max_tokens: 2000,
+    stream: true
+  };
+}
+
 function buildChatBody({ targetLang, question, context }) {
   const history = (context.history || [])
     .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`)
     .join('\n\n');
-  const originalBlock = context.sourceType === 'text' && context.originalText
-    ? `Original selected text:\n${context.originalText}\n\n`
+  const originalBlock = context.originalText
+    ? `${context.sourceType === 'capture' ? 'Captured text' : 'Original selected text'}:\n${context.originalText}\n\n`
     : '';
+  const pageTitleBlock = context.pageTitle ? `Page title: ${context.pageTitle}\n\n` : '';
 
   return {
     model: 'qwen/qwen3.5-9b',
@@ -243,7 +327,7 @@ function buildChatBody({ targetLang, question, context }) {
       {
         role: 'user',
         content: `/no_think
-${originalBlock}Initial action: ${context.action}
+${pageTitleBlock}${originalBlock}Initial action: ${context.action}
 Previous assistant answer:
 ${context.lastAnswer || 'No previous answer.'}
 
@@ -291,6 +375,27 @@ async function postImageChatCompletion({ lmPort, targetLang, imageUrl }) {
       return await postChatCompletion({
         lmPort,
         body: buildImageTranslationBody({ targetLang, imageUrl: payload })
+      });
+    } catch (err) {
+      lastError = err;
+      if (!/HTTP 400|Invalid url|base64 encoded image/i.test(err.message)) {
+        throw err;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+async function postImageCaptureCompletion({ lmPort, imageUrl, prompt, targetLang }) {
+  const payloads = await imageUrlToPayloads(imageUrl);
+  let lastError = null;
+
+  for (const payload of payloads) {
+    try {
+      return await postChatCompletion({
+        lmPort,
+        body: buildCaptureAreaBody({ imageUrl: payload, prompt, targetLang })
       });
     } catch (err) {
       lastError = err;
@@ -362,11 +467,12 @@ chrome.runtime.onConnect.addListener((port) => {
       request.action !== 'translate'
       && request.action !== 'explain'
       && request.action !== 'summarize'
+      && request.action !== 'captureArea'
       && request.action !== 'chat'
       && request.action !== 'translateImage'
     ) return;
 
-    const { text, imageUrl, question, context, lmPort, targetLang } = request;
+    const { text, imageUrl, prompt, question, context, lmPort, targetLang, rect, devicePixelRatio } = request;
 
     try {
       let res;
@@ -383,6 +489,9 @@ chrome.runtime.onConnect.addListener((port) => {
           lmPort,
           body: buildSummarizeBody({ targetLang, text })
         });
+      } else if (request.action === 'captureArea') {
+        const croppedImageUrl = imageUrl || await captureVisibleAreaImage({ port, rect, devicePixelRatio });
+        res = await postImageCaptureCompletion({ lmPort, imageUrl: croppedImageUrl, prompt, targetLang });
       } else if (request.action === 'chat') {
         res = await postChatCompletion({
           lmPort,

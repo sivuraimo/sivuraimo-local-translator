@@ -261,6 +261,55 @@
   scrollbar-color: rgba(113, 113, 122, 0.8) transparent;
 }
 
+#lt-popup.lt-capture-prompting {
+  width: 360px;
+}
+
+#lt-popup.lt-capture-prompting .lt-result {
+  min-height: 0;
+  padding: 14px 14px 10px;
+  max-height: none;
+  overflow: visible;
+}
+
+.lt-capture-intro {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.lt-capture-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 8px;
+  background: rgba(250, 250, 250, 0.08);
+  border: 1px solid rgba(250, 250, 250, 0.12);
+  color: #fafafa;
+}
+
+.lt-capture-copy {
+  min-width: 0;
+}
+
+.lt-capture-title {
+  color: #fafafa;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.lt-capture-hint {
+  margin-top: 2px;
+  color: #a1a1aa;
+  font-size: 12px;
+  line-height: 16px;
+}
+
 .lt-chat {
   border-top: 1px solid rgba(39, 39, 42, 0.72);
   background: rgba(9, 9, 11, 0.18);
@@ -350,6 +399,77 @@
   cursor: nwse-resize;
 }
 
+#lt-capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.lt-capture-selection {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.38);
+  pointer-events: none;
+}
+
+#lt-capture-overlay .lt-capture-toolbar {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(9, 9, 11, 0.94);
+  border: 1px solid rgba(63, 63, 70, 0.8);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 500;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.2);
+  white-space: nowrap;
+  pointer-events: auto;
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+#lt-capture-overlay .lt-capture-toolbar[hidden] {
+  display: none;
+}
+
+#lt-capture-overlay .lt-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  color: #e4e4e7;
+  cursor: pointer;
+  font: inherit;
+  transition: background 0.12s, color 0.12s;
+}
+
+#lt-capture-overlay .lt-action-btn:hover {
+  background: rgba(63, 63, 70, 0.65);
+  color: #fafafa;
+}
+
+#lt-capture-overlay .lt-action-btn svg {
+  flex-shrink: 0;
+}
+
+#lt-capture-overlay .lt-capture-cancel {
+  color: #a1a1aa;
+}
+
 .lt-chat-message {
   position: relative;
   max-width: 100%;
@@ -395,6 +515,19 @@
   padding: 10px 12px 12px;
 }
 
+#lt-popup.lt-capture-prompting .lt-chat {
+  border-top: none;
+  background: transparent;
+}
+
+#lt-popup.lt-capture-prompting .lt-chat-messages {
+  display: none;
+}
+
+#lt-popup.lt-capture-prompting .lt-chat-form {
+  padding: 0 14px 14px;
+}
+
 .lt-chat-composer {
   display: flex;
   align-items: stretch;
@@ -406,6 +539,14 @@
   border-radius: 10px;
   box-shadow: none;
   transition: border-color 0.12s, background 0.12s;
+}
+
+#lt-popup.lt-capture-prompting .lt-chat-composer {
+  min-height: 48px;
+  padding: 8px 6px 8px 13px;
+  background: rgba(12, 12, 14, 0.96);
+  border-color: rgba(82, 82, 91, 0.86);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .lt-chat-composer:focus-within {
@@ -466,6 +607,20 @@
 .lt-stop:hover {
   background: rgba(63, 63, 70, 0.55);
   color: #fafafa;
+}
+
+#lt-popup.lt-capture-prompting .lt-chat-send {
+  width: 30px;
+  height: 30px;
+  margin-top: 1px;
+  background: #fafafa;
+  color: #111;
+  border-radius: 7px;
+}
+
+#lt-popup.lt-capture-prompting .lt-chat-send:hover {
+  background: #fff;
+  color: #111;
 }
 
 .lt-chat-send:disabled,

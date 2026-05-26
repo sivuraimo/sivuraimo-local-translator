@@ -11,6 +11,11 @@ let chatEl = null;
 let chatMessagesEl = null;
 let chatInputEl = null;
 let chatSendEl = null;
+let captureOverlayEl = null;
+let captureSelectionEl = null;
+let captureToolbarEl = null;
+let captureSendEl = null;
+let captureCancelEl = null;
 let currentSelection = '';
 let isStreaming = false;
 let isDraggingPopup = false;
@@ -19,6 +24,7 @@ let activeStreamId = 0;
 let activePort = null;
 let activeTargetEl = null;
 let sessionContext = null;
+let pendingCapturePrompt = null;
 let chatHistory = [];
 let lastCopyText = '';
 const POPUP_MIN_WIDTH = 300;
@@ -26,6 +32,8 @@ const POPUP_MIN_HEIGHT = 190;
 const POPUP_DEFAULT_WIDTH = 320;
 const CHAT_INPUT_MIN_HEIGHT = 38;
 const CHAT_INPUT_MAX_HEIGHT = 120;
+const CHAT_INPUT_DEFAULT_PLACEHOLDER = 'Ask follow-up...';
+const CAPTURE_PROMPT_PLACEHOLDER = 'Ask what to do with this screenshot...';
 
 function createButton() {
   const btn = document.createElement('div');
@@ -225,6 +233,322 @@ function handleChatInputKeydown(e) {
   }
 }
 
+function removeCaptureOverlay() {
+  if (!captureOverlayEl) return;
+
+  captureOverlayEl.remove();
+  captureOverlayEl = null;
+  captureSelectionEl = null;
+  captureToolbarEl = null;
+  captureSendEl = null;
+  captureCancelEl = null;
+  document.documentElement.style.cursor = '';
+  document.body.style.userSelect = '';
+}
+
+function captureAreaImage(rect, devicePixelRatio) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
+      action: 'captureAreaImage',
+      rect,
+      devicePixelRatio
+    }, (response) => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        reject(new Error(err.message));
+        return;
+      }
+      if (response?.error) {
+        reject(new Error(response.error));
+        return;
+      }
+      if (!response?.imageUrl) {
+        reject(new Error('Unable to capture selected area.'));
+        return;
+      }
+
+      resolve(response.imageUrl);
+    });
+  });
+}
+
+function showCapturePrompt({ rect, imageUrl, settings }) {
+  showPopup(rect.left, rect.top, settings.targetLang, 'Capture');
+  clearChat();
+  translatePopup?.classList.add('lt-capture-prompting');
+  if (translatePopup && (parseFloat(translatePopup.style.width) || 0) < 360) {
+    translatePopup.style.width = '360px';
+  }
+  pendingCapturePrompt = {
+    imageUrl,
+    settings,
+    targetLang: settings.targetLang
+  };
+  sessionContext = {
+    sourceType: 'capture',
+    action: 'captureArea',
+    originalText: '',
+    targetLang: settings.targetLang,
+    lastAnswer: ''
+  };
+
+  if (popupResultEl) {
+    popupResultEl.innerHTML = `
+      <div class="lt-capture-intro">
+        <div class="lt-capture-mark" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 8h.01"/><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 15 4-4a2 2 0 0 1 2.8 0l4.2 4.2"/><path d="m13 14 1.2-1.2a2 2 0 0 1 2.8 0L21 17"/></svg>
+        </div>
+        <div class="lt-capture-copy">
+          <div class="lt-capture-title">Screenshot ready</div>
+          <div class="lt-capture-hint">Ask about the selected area or send empty to extract text.</div>
+        </div>
+      </div>
+    `;
+  }
+  if (chatInputEl) {
+    chatInputEl.placeholder = CAPTURE_PROMPT_PLACEHOLDER;
+    chatInputEl.focus();
+  }
+  setChatVisible(true);
+  setChatInputEnabled(true);
+  setStopVisible(false);
+}
+
+function submitPendingCapturePrompt(prompt) {
+  if (!pendingCapturePrompt) return false;
+
+  const { imageUrl, settings, targetLang } = pendingCapturePrompt;
+  pendingCapturePrompt = null;
+  translatePopup?.classList.remove('lt-capture-prompting');
+  if (chatInputEl) chatInputEl.placeholder = CHAT_INPUT_DEFAULT_PLACEHOLDER;
+  if (chatMessagesEl) chatMessagesEl.textContent = '';
+  chatHistory = [];
+
+  streamTranslation({
+    action: 'captureArea',
+    imageUrl,
+    prompt,
+    lmPort: settings.port,
+    targetLang
+  }, {
+    onComplete(answer) {
+      if (!sessionContext) return;
+      sessionContext.originalText = answer;
+      sessionContext.lastAnswer = answer;
+      lastCopyText = answer;
+      setChatVisible(true);
+      chatInputEl?.focus();
+    }
+  });
+
+  return true;
+}
+
+function clampRectToViewport(rect) {
+  const left = Math.max(0, rect.left);
+  const top = Math.max(0, rect.top);
+  const right = Math.min(window.innerWidth, rect.right);
+  const bottom = Math.min(window.innerHeight, rect.bottom);
+  return {
+    left,
+    top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top)
+  };
+}
+
+function positionCaptureToolbar(rect) {
+  if (!captureToolbarEl) return;
+  const toolbarWidth = captureToolbarEl.offsetWidth || 312;
+  const toolbarHeight = captureToolbarEl.offsetHeight || 38;
+  const margin = 10;
+  const left = clamp(
+    rect.left + rect.width / 2 - toolbarWidth / 2,
+    margin,
+    Math.max(margin, window.innerWidth - toolbarWidth - margin)
+  );
+  const belowTop = rect.top + rect.height + 12;
+  const aboveTop = rect.top - toolbarHeight - 12;
+  const hasRoomBelow = belowTop + toolbarHeight <= window.innerHeight - margin;
+  const top = hasRoomBelow ? belowTop : Math.max(margin, aboveTop);
+  captureToolbarEl.style.left = `${left}px`;
+  captureToolbarEl.style.top = `${top}px`;
+}
+
+function setCaptureSelectionRect(rect) {
+  if (!captureSelectionEl) return;
+  captureSelectionEl.style.left = `${rect.left}px`;
+  captureSelectionEl.style.top = `${rect.top}px`;
+  captureSelectionEl.style.width = `${rect.width}px`;
+  captureSelectionEl.style.height = `${rect.height}px`;
+}
+
+function startAreaCapture() {
+  if (captureOverlayEl) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'lt-capture-overlay';
+  overlay.innerHTML = `
+    <div class="lt-capture-selection" hidden></div>
+    <div class="lt-capture-toolbar" hidden>
+      <button type="button" class="lt-action-btn" data-capture-action="translate">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-2"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M22 22l-5-10-5 10"/><path d="M14 18h6"/></svg>
+        Translate
+      </button>
+      <button type="button" class="lt-action-btn" data-capture-action="extract">Extract text</button>
+      <button type="button" class="lt-action-btn" data-capture-action="custom">Custom prompt</button>
+      <button type="button" class="lt-action-btn lt-capture-cancel">Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  captureOverlayEl = overlay;
+  captureSelectionEl = overlay.querySelector('.lt-capture-selection');
+  captureToolbarEl = overlay.querySelector('.lt-capture-toolbar');
+  captureSendEl = overlay.querySelector('.lt-capture-send');
+  captureCancelEl = overlay.querySelector('.lt-capture-cancel');
+  document.documentElement.style.cursor = 'crosshair';
+  document.body.style.userSelect = 'none';
+
+  const state = {
+    dragging: false,
+    startX: 0,
+    startY: 0,
+    rect: null
+  };
+
+  const cleanup = () => {
+    overlay.removeEventListener('mousedown', onMouseDown);
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+    document.removeEventListener('keydown', onKeyDown, true);
+    captureToolbarEl?.removeEventListener('click', onToolbarClick);
+    captureCancelEl?.removeEventListener('click', onCancel);
+    removeCaptureOverlay();
+  };
+
+  const onCancel = () => {
+    cleanup();
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cleanup();
+    }
+  };
+
+  const onMouseDown = (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('.lt-capture-toolbar')) return;
+
+    state.dragging = true;
+    state.startX = e.clientX;
+    state.startY = e.clientY;
+    state.rect = null;
+    captureSelectionEl.hidden = false;
+    captureToolbarEl.hidden = true;
+    setCaptureSelectionRect({ left: e.clientX, top: e.clientY, width: 0, height: 0 });
+    e.preventDefault();
+  };
+
+  const onMouseMove = (e) => {
+    if (!state.dragging) return;
+
+    const rect = clampRectToViewport({
+      left: Math.min(state.startX, e.clientX),
+      top: Math.min(state.startY, e.clientY),
+      right: Math.max(state.startX, e.clientX),
+      bottom: Math.max(state.startY, e.clientY)
+    });
+
+    state.rect = rect;
+    setCaptureSelectionRect(rect);
+  };
+
+  const onMouseUp = () => {
+    if (!state.dragging) return;
+    state.dragging = false;
+
+    if (!state.rect || state.rect.width < 8 || state.rect.height < 8) {
+      cleanup();
+      return;
+    }
+
+    captureToolbarEl.hidden = false;
+    positionCaptureToolbar(state.rect);
+  };
+
+  const runQuickCaptureAction = async (action) => {
+    if (!state.rect) return;
+    const rect = { ...state.rect };
+
+    try {
+      const settings = await getSettings();
+      const devicePixelRatio = window.devicePixelRatio || 1;
+      cleanup();
+      const imageUrl = await captureAreaImage(rect, devicePixelRatio);
+
+      if (action === 'custom') {
+        showCapturePrompt({ rect, imageUrl, settings });
+        return;
+      }
+
+      const isTranslate = action === 'translate';
+      const targetLang = settings.targetLang;
+      const label = isTranslate ? 'Translate' : 'Extract text';
+      const prompt = isTranslate
+        ? `Translate all visible text in this screenshot to ${targetLang}. Return only the translation, preserving line breaks and simple structure.`
+        : '';
+
+      translatePopup?.classList.remove('lt-capture-prompting');
+      showPopup(rect.left, rect.top, targetLang, label);
+      clearChat();
+      sessionContext = {
+        sourceType: 'capture',
+        action: 'captureArea',
+        originalText: '',
+        targetLang,
+        lastAnswer: ''
+      };
+
+      streamTranslation({
+        action: 'captureArea',
+        imageUrl,
+        prompt,
+        lmPort: settings.port,
+        targetLang
+      }, {
+        onComplete(answer) {
+          if (!sessionContext) return;
+          sessionContext.originalText = answer;
+          sessionContext.lastAnswer = answer;
+          lastCopyText = answer;
+          setChatVisible(true);
+          chatInputEl?.focus();
+        }
+      });
+    } catch (err) {
+      cleanup();
+      showPopup(rect.left, rect.top, 'unknown', 'Capture');
+      showError(err.message || 'Unable to read extension settings');
+    }
+  };
+
+  const onToolbarClick = (e) => {
+    const actionButton = e.target.closest?.('button[data-capture-action]');
+    if (!actionButton) return;
+    runQuickCaptureAction(actionButton.dataset.captureAction);
+  };
+
+  overlay.addEventListener('mousedown', onMouseDown);
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+  document.addEventListener('keydown', onKeyDown, true);
+  captureToolbarEl.addEventListener('click', onToolbarClick);
+  captureCancelEl.addEventListener('click', onCancel);
+}
+
 function resizePopup(e, popup, edge, start) {
   const maxWidth = Math.max(POPUP_MIN_WIDTH, window.innerWidth);
   const maxHeight = Math.max(POPUP_MIN_HEIGHT, window.innerHeight);
@@ -333,6 +657,7 @@ function clearChat() {
   if (chatMessagesEl) chatMessagesEl.textContent = '';
   if (chatInputEl) {
     chatInputEl.value = '';
+    chatInputEl.placeholder = pendingCapturePrompt ? CAPTURE_PROMPT_PLACEHOLDER : CHAT_INPUT_DEFAULT_PLACEHOLDER;
     resizeChatInput();
   }
   setChatInputEnabled(true);
@@ -340,6 +665,8 @@ function clearChat() {
 
 function resetSession() {
   sessionContext = null;
+  pendingCapturePrompt = null;
+  translatePopup?.classList.remove('lt-capture-prompting');
   lastCopyText = '';
   setExportMenuVisible(false);
   setButtonCopied(mainCopyBtnEl, false);
@@ -641,6 +968,7 @@ async function handleTextAction(action) {
     const settings = await getSettings();
     showPopup(btnLeft, btnTop, settings.targetLang, getActionLabel(action));
     clearChat();
+
     sessionContext = {
       sourceType: 'text',
       action,
@@ -711,10 +1039,17 @@ async function handleImageTranslate(imageUrl) {
 
 async function handleChatSubmit(e) {
   e.preventDefault();
-  if (!sessionContext || isStreaming) return;
+  if (isStreaming) return;
 
   const question = chatInputEl.value.trim();
-  if (!question) return;
+  if (pendingCapturePrompt) {
+    chatInputEl.value = '';
+    resizeChatInput();
+    submitPendingCapturePrompt(question);
+    return;
+  }
+
+  if (!sessionContext || !question) return;
 
   try {
     const settings = await getSettings();
@@ -761,6 +1096,7 @@ document.addEventListener('contextmenu', (e) => {
 
 document.addEventListener('mouseup', (e) => {
   if (isDraggingPopup) return;
+  if (e.target.closest?.('#lt-capture-overlay')) return;
 
   setTimeout(() => {
     // Clicking the action bar — let the button handlers manage state
@@ -797,7 +1133,13 @@ document.addEventListener('scroll', () => {
   if (translateBtn) translateBtn.style.display = 'none';
 }, { passive: true });
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'startAreaCapture') {
+    startAreaCapture();
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message.action !== 'translateImageFromContextMenu' || !message.srcUrl) return;
   handleImageTranslate(message.srcUrl);
 });
