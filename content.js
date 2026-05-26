@@ -4,6 +4,7 @@ let popupResultEl = null;   // direct reference, not searched by id
 let popupOriginalEl = null;
 let currentSelection = '';
 let isStreaming = false;
+let isDraggingPopup = false;
 
 function createButton() {
   const btn = document.createElement('div');
@@ -38,6 +39,7 @@ function createPopup() {
   header.addEventListener('mousedown', (e) => {
     if (e.target.classList.contains('lt-close')) return;
     dragging = true;
+    isDraggingPopup = true;
     const rect = popup.getBoundingClientRect();
     dragOffsetX = e.clientX - rect.left;
     dragOffsetY = e.clientY - rect.top;
@@ -54,6 +56,7 @@ function createPopup() {
   document.addEventListener('mouseup', () => {
     if (dragging) {
       dragging = false;
+      isDraggingPopup = false;
       header.classList.remove('lt-dragging');
     }
   });
@@ -160,6 +163,8 @@ async function handleTranslate() {
 }
 
 document.addEventListener('mouseup', (e) => {
+  if (isDraggingPopup) return;
+
   setTimeout(() => {
     // Clicking the translate button — let handleTranslate manage state
     if (e.target.id === 'lt-translate-btn' || e.target.closest?.('#lt-translate-btn')) return;
