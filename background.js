@@ -42,6 +42,22 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   });
 });
 
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action !== 'getSettings') return false;
+
+  chrome.storage.sync.get({ port: '1234', targetLang: 'русский' }, (settings) => {
+    const err = chrome.runtime.lastError;
+    if (err) {
+      sendResponse({ error: err.message });
+      return;
+    }
+
+    sendResponse(settings);
+  });
+
+  return true;
+});
+
 function isVisionUnsupportedError(message) {
   return /image|vision|multimodal|content type|unsupported|invalid content/i.test(message)
     && /unsupported|not support|does not support|invalid|expected.*string/i.test(message);
@@ -184,6 +200,28 @@ function buildExplainBody({ targetLang, text }) {
   };
 }
 
+function buildSummarizeBody({ targetLang, text }) {
+  return {
+    model: 'qwen/qwen3.5-9b',
+    messages: [
+      {
+        role: 'system',
+        content: `Ты кратко пересказываешь выделенный пользователем текст на ${targetLang}.
+Сохраняй только важные мысли и выводы.
+Если текст короткий — ответь 1-2 предложениями.
+Если текст длинный — используй структуру:
+- Summary: краткое резюме.
+- Key points: основные пункты.
+Не добавляй факты, которых нет в тексте. Не используй markdown-таблицы.`
+      },
+      { role: 'user', content: '/no_think\nСделай краткое резюме этого текста:\n\n' + text }
+    ],
+    temperature: 0.3,
+    max_tokens: 2000,
+    stream: true
+  };
+}
+
 function buildImageTranslationBody({ targetLang, imageUrl }) {
   return {
     model: 'qwen/qwen3.5-9b',
@@ -282,7 +320,12 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'translator') return;
 
   port.onMessage.addListener(async (request) => {
-    if (request.action !== 'translate' && request.action !== 'explain' && request.action !== 'translateImage') return;
+    if (
+      request.action !== 'translate'
+      && request.action !== 'explain'
+      && request.action !== 'summarize'
+      && request.action !== 'translateImage'
+    ) return;
 
     const { text, imageUrl, lmPort, targetLang } = request;
 
@@ -295,6 +338,11 @@ chrome.runtime.onConnect.addListener((port) => {
         res = await postChatCompletion({
           lmPort,
           body: buildExplainBody({ targetLang, text })
+        });
+      } else if (request.action === 'summarize') {
+        res = await postChatCompletion({
+          lmPort,
+          body: buildSummarizeBody({ targetLang, text })
         });
       } else {
         res = await postChatCompletion({

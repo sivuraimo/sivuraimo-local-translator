@@ -21,16 +21,15 @@ function createButton() {
     <button type="button" class="lt-action-btn" data-action="explain">
       Explain
     </button>
+    <button type="button" class="lt-action-btn" data-action="summarize">
+      Summarize
+    </button>
   `;
   btn.addEventListener('click', (e) => {
     const actionBtn = e.target.closest?.('.lt-action-btn');
     if (!actionBtn) return;
 
-    if (actionBtn.dataset.action === 'explain') {
-      handleTextAction('explain');
-    } else {
-      handleTextAction('translate');
-    }
+    handleTextAction(actionBtn.dataset.action);
   });
   document.body.appendChild(btn);
   return btn;
@@ -125,6 +124,36 @@ function showPopup(x, y, targetLang, label = 'Translate') {
   popupLangEl.textContent = targetLang;
 }
 
+function getSettings() {
+  const defaults = { port: '1234', targetLang: 'русский' };
+  const chromeApi = globalThis.chrome;
+
+  if (chromeApi?.storage?.sync) {
+    return chromeApi.storage.sync.get(defaults);
+  }
+
+  return new Promise((resolve, reject) => {
+    if (!chromeApi?.runtime?.sendMessage) {
+      reject(new Error('Extension API is not available on this page. Reload the page and try again.'));
+      return;
+    }
+
+    chromeApi.runtime.sendMessage({ action: 'getSettings' }, (response) => {
+      const err = chromeApi.runtime.lastError;
+      if (err) {
+        reject(new Error(err.message));
+        return;
+      }
+      if (response?.error) {
+        reject(new Error(response.error));
+        return;
+      }
+
+      resolve({ ...defaults, ...response });
+    });
+  });
+}
+
 function hideAll() {
   if (translateBtn) translateBtn.style.display = 'none';
   if (translatePopup) translatePopup.style.display = 'none';
@@ -207,40 +236,57 @@ function streamTranslation(payload) {
   }
 }
 
+function getActionLabel(action) {
+  if (action === 'explain') return 'Explain';
+  if (action === 'summarize') return 'Summarize';
+  return 'Translate';
+}
+
 async function handleTextAction(action) {
   if (!currentSelection) return;
 
-  const btnLeft = parseInt(translateBtn.style.left);
-  const btnTop = parseInt(translateBtn.style.top);
-  translateBtn.style.display = 'none';
+  try {
+    const btnLeft = parseInt(translateBtn.style.left);
+    const btnTop = parseInt(translateBtn.style.top);
+    translateBtn.style.display = 'none';
 
-  const settings = await chrome.storage.sync.get({ port: '1234', targetLang: 'русский' });
-  showPopup(btnLeft, btnTop, settings.targetLang, action === 'explain' ? 'Explain' : 'Translate');
+    const settings = await getSettings();
+    showPopup(btnLeft, btnTop, settings.targetLang, getActionLabel(action));
 
-  streamTranslation({
-    action,
-    text: currentSelection,
-    lmPort: settings.port,
-    targetLang: settings.targetLang
-  });
+    streamTranslation({
+      action,
+      text: currentSelection,
+      lmPort: settings.port,
+      targetLang: settings.targetLang
+    });
+  } catch (err) {
+    showPopup(parseInt(translateBtn.style.left) || 10, parseInt(translateBtn.style.top) || 10, 'unknown', getActionLabel(action));
+    showError(err.message || 'Unable to read extension settings');
+  }
 }
 
 async function handleImageTranslate(imageUrl) {
-  const settings = await chrome.storage.sync.get({ port: '1234', targetLang: 'русский' });
-  const point = lastContextMenuPoint || {
-    x: Math.round(window.innerWidth / 2 - 160),
-    y: Math.round(window.innerHeight / 3)
-  };
+  try {
+    const settings = await getSettings();
+    const point = lastContextMenuPoint || {
+      x: Math.round(window.innerWidth / 2 - 160),
+      y: Math.round(window.innerHeight / 3)
+    };
 
-  if (translateBtn) translateBtn.style.display = 'none';
-  showPopup(point.x, point.y, settings.targetLang, 'Translate');
+    if (translateBtn) translateBtn.style.display = 'none';
+    showPopup(point.x, point.y, settings.targetLang, 'Translate');
 
-  streamTranslation({
-    action: 'translateImage',
-    imageUrl,
-    lmPort: settings.port,
-    targetLang: settings.targetLang
-  });
+    streamTranslation({
+      action: 'translateImage',
+      imageUrl,
+      lmPort: settings.port,
+      targetLang: settings.targetLang
+    });
+  } catch (err) {
+    const point = lastContextMenuPoint || { x: 10, y: 10 };
+    showPopup(point.x, point.y, 'unknown', 'Translate');
+    showError(err.message || 'Unable to read extension settings');
+  }
 }
 
 document.addEventListener('contextmenu', (e) => {
