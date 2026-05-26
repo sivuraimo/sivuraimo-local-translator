@@ -21,6 +21,11 @@ let activeTargetEl = null;
 let sessionContext = null;
 let chatHistory = [];
 let lastCopyText = '';
+const POPUP_MIN_WIDTH = 300;
+const POPUP_MIN_HEIGHT = 190;
+const POPUP_DEFAULT_WIDTH = 320;
+const CHAT_INPUT_MIN_HEIGHT = 38;
+const CHAT_INPUT_MAX_HEIGHT = 120;
 
 function createButton() {
   const btn = document.createElement('div');
@@ -80,7 +85,7 @@ function createPopup() {
       <div class="lt-chat-messages"></div>
       <form class="lt-chat-form">
         <div class="lt-chat-composer">
-          <input class="lt-chat-input" type="text" placeholder="Ask follow-up..." autocomplete="off">
+          <textarea class="lt-chat-input" rows="1" placeholder="Ask follow-up..." autocomplete="off"></textarea>
           <button class="lt-chat-send" type="submit" aria-label="Send message" title="Send">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
           </button>
@@ -90,6 +95,14 @@ function createPopup() {
         </div>
       </form>
     </div>
+    <div class="lt-resize-handle lt-resize-n" data-resize-edge="n"></div>
+    <div class="lt-resize-handle lt-resize-e" data-resize-edge="e"></div>
+    <div class="lt-resize-handle lt-resize-s" data-resize-edge="s"></div>
+    <div class="lt-resize-handle lt-resize-w" data-resize-edge="w"></div>
+    <div class="lt-resize-handle lt-resize-ne" data-resize-edge="ne"></div>
+    <div class="lt-resize-handle lt-resize-se" data-resize-edge="se"></div>
+    <div class="lt-resize-handle lt-resize-sw" data-resize-edge="sw"></div>
+    <div class="lt-resize-handle lt-resize-nw" data-resize-edge="nw"></div>
   `;
   document.body.appendChild(popup);
   // store direct references — no getElementById on document
@@ -105,6 +118,8 @@ function createPopup() {
   chatInputEl = popup.querySelector('.lt-chat-input');
   chatSendEl = popup.querySelector('.lt-chat-send');
   stopBtnEl.addEventListener('click', stopGeneration);
+  chatInputEl.addEventListener('input', resizeChatInput);
+  chatInputEl.addEventListener('keydown', handleChatInputKeydown);
   exportBtnEl.addEventListener('click', toggleExportMenu);
   exportMenuEl.addEventListener('click', handleExportMenuClick);
   mainCopyBtnEl.addEventListener('click', () => copyAnswer(mainCopyBtnEl, popupResultEl.textContent));
@@ -114,6 +129,7 @@ function createPopup() {
   // Draggable via header
   const header = popup.querySelector('.lt-header');
   let dragging = false, dragOffsetX = 0, dragOffsetY = 0;
+  let resizing = false, resizeEdge = '', resizeStart = null;
 
   header.addEventListener('mousedown', (e) => {
     if (e.target.closest('.lt-header-actions')) return;
@@ -128,8 +144,37 @@ function createPopup() {
 
   document.addEventListener('mousemove', (e) => {
     if (!dragging) return;
-    popup.style.left = (e.clientX - dragOffsetX) + 'px';
-    popup.style.top = (e.clientY - dragOffsetY) + 'px';
+    const width = popup.offsetWidth || POPUP_DEFAULT_WIDTH;
+    const height = popup.offsetHeight || POPUP_MIN_HEIGHT;
+    const nextLeft = clamp(e.clientX - dragOffsetX, 0, window.innerWidth - width);
+    const nextTop = clamp(e.clientY - dragOffsetY, 0, window.innerHeight - height);
+    popup.style.left = nextLeft + 'px';
+    popup.style.top = nextTop + 'px';
+  });
+
+  popup.querySelectorAll('.lt-resize-handle').forEach((handle) => {
+    handle.addEventListener('mousedown', (e) => {
+      resizing = true;
+      isDraggingPopup = true;
+      resizeEdge = handle.dataset.resizeEdge;
+      const rect = popup.getBoundingClientRect();
+      resizeStart = {
+        x: e.clientX,
+        y: e.clientY,
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height
+      };
+      popup.classList.add('lt-resizing');
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!resizing || !resizeStart) return;
+    resizePopup(e, popup, resizeEdge, resizeStart);
   });
 
   document.addEventListener('mouseup', () => {
@@ -137,6 +182,13 @@ function createPopup() {
       dragging = false;
       isDraggingPopup = false;
       header.classList.remove('lt-dragging');
+    }
+    if (resizing) {
+      resizing = false;
+      isDraggingPopup = false;
+      resizeEdge = '';
+      resizeStart = null;
+      popup.classList.remove('lt-resizing');
     }
   });
 
@@ -147,6 +199,93 @@ function showLoading(targetEl = popupResultEl) {
   if (targetEl) {
     targetEl.innerHTML = '<div class="lt-loading"><div class="lt-dot"></div><div class="lt-dot"></div><div class="lt-dot"></div></div>';
   }
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function resizeChatInput() {
+  if (!chatInputEl) return;
+  chatInputEl.style.height = 'auto';
+  const nextHeight = Math.max(
+    CHAT_INPUT_MIN_HEIGHT,
+    Math.min(chatInputEl.scrollHeight, CHAT_INPUT_MAX_HEIGHT)
+  );
+  chatInputEl.style.height = nextHeight + 'px';
+  chatInputEl.style.overflowY = chatInputEl.scrollHeight > CHAT_INPUT_MAX_HEIGHT ? 'auto' : 'hidden';
+  updatePopupScrollAreas();
+}
+
+function handleChatInputKeydown(e) {
+  if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+  e.preventDefault();
+  if (chatInputEl?.form) {
+    chatInputEl.form.requestSubmit();
+  }
+}
+
+function resizePopup(e, popup, edge, start) {
+  const maxWidth = Math.max(POPUP_MIN_WIDTH, window.innerWidth);
+  const maxHeight = Math.max(POPUP_MIN_HEIGHT, window.innerHeight);
+  let nextLeft = start.left;
+  let nextTop = start.top;
+  let nextWidth = start.width;
+  let nextHeight = start.height;
+  const dx = e.clientX - start.x;
+  const dy = e.clientY - start.y;
+
+  if (edge.includes('e')) {
+    nextWidth = clamp(start.width + dx, POPUP_MIN_WIDTH, maxWidth - start.left);
+  }
+
+  if (edge.includes('s')) {
+    nextHeight = clamp(start.height + dy, POPUP_MIN_HEIGHT, maxHeight - start.top);
+  }
+
+  if (edge.includes('w')) {
+    const maxRightWidth = start.left + start.width;
+    nextWidth = clamp(start.width - dx, POPUP_MIN_WIDTH, maxRightWidth);
+    nextLeft = start.left + start.width - nextWidth;
+  }
+
+  if (edge.includes('n')) {
+    const maxBottomHeight = start.top + start.height;
+    nextHeight = clamp(start.height - dy, POPUP_MIN_HEIGHT, maxBottomHeight);
+    nextTop = start.top + start.height - nextHeight;
+  }
+
+  popup.style.left = Math.max(0, nextLeft) + 'px';
+  popup.style.top = Math.max(0, nextTop) + 'px';
+  popup.style.width = nextWidth + 'px';
+  popup.style.height = nextHeight + 'px';
+  updatePopupScrollAreas(popup);
+}
+
+function updatePopupScrollAreas(popup = translatePopup) {
+  if (!popup) return;
+  const customHeight = popup.style.height.endsWith('px') ? parseFloat(popup.style.height) : 0;
+
+  if (!customHeight) {
+    if (popupResultEl) popupResultEl.style.maxHeight = '';
+    if (chatMessagesEl) chatMessagesEl.style.maxHeight = '';
+    return;
+  }
+
+  const headerHeight = popup.querySelector('.lt-header')?.offsetHeight || 44;
+  const chatVisible = chatEl && !chatEl.hidden;
+  const chatFormHeight = chatVisible ? (popup.querySelector('.lt-chat-form')?.offsetHeight || 58) : 0;
+  const chromeHeight = headerHeight + chatFormHeight + (chatVisible ? 28 : 0);
+  const available = Math.max(64, customHeight - chromeHeight);
+
+  if (chatVisible) {
+    if (popupResultEl) popupResultEl.style.maxHeight = Math.max(52, Math.floor(available * 0.48)) + 'px';
+    if (chatMessagesEl) chatMessagesEl.style.maxHeight = Math.max(64, Math.floor(available * 0.52)) + 'px';
+    return;
+  }
+
+  if (popupResultEl) popupResultEl.style.maxHeight = Math.max(52, available) + 'px';
+  if (chatMessagesEl) chatMessagesEl.style.maxHeight = '';
 }
 
 function showError(message, targetEl = popupResultEl) {
@@ -169,12 +308,15 @@ function showButton(x, y) {
 function showPopup(x, y, targetLang, label = 'Translate') {
   if (!translatePopup) translatePopup = createPopup();
 
-  const popupWidth = 320;
   const popupMargin = 10;
-  const left = Math.min(Math.max(x, popupMargin), window.innerWidth - popupWidth - popupMargin);
+  const popupWidth = parseFloat(translatePopup.style.width) || translatePopup.offsetWidth || POPUP_DEFAULT_WIDTH;
+  const maxLeft = Math.max(popupMargin, window.innerWidth - popupWidth - popupMargin);
+  const left = clamp(x, popupMargin, maxLeft);
 
   translatePopup.style.left = left + 'px';
   translatePopup.style.top = Math.max(popupMargin, y) + 'px';
+  if (!translatePopup.style.width) translatePopup.style.width = POPUP_DEFAULT_WIDTH + 'px';
+  updatePopupScrollAreas(translatePopup);
   translatePopup.style.display = 'block';
   popupLabelEl.textContent = label;
   popupLangEl.textContent = targetLang;
@@ -183,12 +325,16 @@ function showPopup(x, y, targetLang, label = 'Translate') {
 function setChatVisible(visible) {
   if (!chatEl) return;
   chatEl.hidden = !visible;
+  updatePopupScrollAreas();
 }
 
 function clearChat() {
   chatHistory = [];
   if (chatMessagesEl) chatMessagesEl.textContent = '';
-  if (chatInputEl) chatInputEl.value = '';
+  if (chatInputEl) {
+    chatInputEl.value = '';
+    resizeChatInput();
+  }
   setChatInputEnabled(true);
 }
 
@@ -573,6 +719,7 @@ async function handleChatSubmit(e) {
   try {
     const settings = await getSettings();
     chatInputEl.value = '';
+    resizeChatInput();
     appendChatMessage('user', question);
     const assistantEl = appendChatMessage('assistant');
 
