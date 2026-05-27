@@ -18,8 +18,8 @@ The extension sends selected text or screenshots to a local OpenAI-compatible en
 ## Requirements
 
 - Google Chrome or another Chromium-based browser.
-- LM Studio with Local Server enabled.
-- A local model loaded in LM Studio.
+- [LM Studio](https://lmstudio.ai/) with Local Server enabled.
+- A local model loaded in LM Studio. Current configured model: `qwen/qwen3.5-9b`.
 - For image translation and screenshot analysis, use a vision-capable model.
 
 Default endpoint:
@@ -84,26 +84,10 @@ Main files:
 - `content.css`: injected UI styles.
 - `popup.html` and `popup.js`: extension popup settings and capture entry point.
 
-## Publishing To GitHub
-
-Create an empty repository on GitHub, then run:
-
-```bash
-git remote add origin https://github.com/YOUR_USERNAME/sivuraimo-local-translator.git
-git branch -M main
-git push -u origin main
-```
-
-If you use GitHub CLI:
-
-```bash
-gh repo create sivuraimo-local-translator --public --source=. --remote=origin --push
-```
-
 ## Notes
 
 - The extension expects an OpenAI-compatible chat completions API exposed by LM Studio.
-- The model name is currently hardcoded in `background.js`.
+- The model name is currently hardcoded in `background.js` as `qwen/qwen3.5-9b`.
 - Some browser pages such as `chrome://extensions` do not allow content script injection.
 - Image translation requires a model that supports image input.
 
