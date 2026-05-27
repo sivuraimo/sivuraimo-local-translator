@@ -1,4 +1,4 @@
-# Local Translator
+# Sivuraimo Local Translator
 
 Chrome/Chromium extension for translating and working with selected text through a local LM Studio server.
 
@@ -89,7 +89,7 @@ Main files:
 Create an empty repository on GitHub, then run:
 
 ```bash
-git remote add origin https://github.com/YOUR_USERNAME/translator-extension.git
+git remote add origin https://github.com/YOUR_USERNAME/sivuraimo-local-translator.git
 git branch -M main
 git push -u origin main
 ```
@@ -97,7 +97,7 @@ git push -u origin main
 If you use GitHub CLI:
 
 ```bash
-gh repo create translator-extension --public --source=. --remote=origin --push
+gh repo create sivuraimo-local-translator --public --source=. --remote=origin --push
 ```
 
 ## Notes
