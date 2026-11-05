@@ -83,7 +83,10 @@ function isVisionUnsupportedError(message) {
 function normalizeErrorMessage(err) {
   const message = err?.message || String(err);
   if (message.includes('Failed to fetch')) {
-    return 'LM Studio is not running. Check Local Server.';
+    return 'Model server is unreachable. For LM Studio check Local Server, for Anthropic check your connection.';
+  }
+  if (/HTTP 401|authentication_error|invalid x-api-key/i.test(message)) {
+    return 'Invalid Anthropic API key. Check it in the extension popup.';
   }
   if (isVisionUnsupportedError(message)) {
     return 'This model does not support images. Load a vision model in LM Studio.';
@@ -194,12 +197,84 @@ async function captureVisibleAreaImage({ port, windowId, rect, devicePixelRatio 
   return cropDataUrlToPngDataUrl(screenshot, rect, devicePixelRatio);
 }
 
-async function postChatCompletion({ lmPort, body }) {
-  const res = await fetch(`http://127.0.0.1:${lmPort}/v1/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+const ANTHROPIC_MODEL = 'claude-haiku-5-5';
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+const ANTHROPIC_VERSION = '2026-10-21';
+
+async function getProviderSettings() {
+  const { provider } = await chrome.storage.sync.get({ provider: 'lmstudio' });
+  const { anthropicKey } = await chrome.storage.local.get({ anthropicKey: '' });
+  return { provider, anthropicKey };
+}
+
+function stripNoThink(text) {
+  return typeof text === 'string' ? text.replace(/^\/no_think\n?/, '') : text;
+}
+
+function toAnthropicImageBlock(url) {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(url);
+  return {
+    type: 'image',
+    source: {
+      type: 'base64',
+      media_type: match ? match[1] : 'image/png',
+      data: match ? match[2] : url
+    }
+  };
+}
+
+function toAnthropicContent(content) {
+  if (typeof content === 'string') return stripNoThink(content);
+
+  return content.map((part) => {
+    if (part.type === 'image_url') return toAnthropicImageBlock(part.image_url.url);
+    return { type: 'text', text: stripNoThink(part.text) };
   });
+}
+
+function toAnthropicBody(body) {
+  const system = body.messages
+    .filter((message) => message.role === 'system')
+    .map((message) => message.content)
+    .join('\n\n');
+  const messages = body.messages
+    .filter((message) => message.role !== 'system')
+    .map((message) => ({ role: message.role, content: toAnthropicContent(message.content) }));
+
+  return {
+    model: ANTHROPIC_MODEL,
+    max_tokens: 4096,
+    output_config: { effort: 'low' },
+    ...(system ? { system } : {}),
+    messages,
+    stream: true
+  };
+}
+
+async function postAnthropicCompletion({ apiKey, body }) {
+  if (!apiKey) throw new Error('Anthropic API key is not set. Add it in the extension popup.');
+
+  return fetch(ANTHROPIC_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify(toAnthropicBody(body))
+  });
+}
+
+async function postChatCompletion({ lmPort, body }) {
+  const { provider, anthropicKey } = await getProviderSettings();
+  const res = provider === 'anthropic'
+    ? await postAnthropicCompletion({ apiKey: anthropicKey, body })
+    : await fetch(`http://127.0.0.1:${lmPort}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
 
   if (!res.ok) {
     const errorText = await res.text().catch(() => '');
@@ -442,15 +517,25 @@ async function streamCompletion({ port, response }) {
       }
       try {
         const parsed = JSON.parse(data);
-        const delta = parsed.choices?.[0]?.delta;
-        console.log('[BG] delta:', JSON.stringify(delta));
-        const chunk = delta?.content; // reasoning_content = thinking mode, ignore it
+        if (parsed.type === 'error') {
+          throw new Error(parsed.error?.message || 'Anthropic stream error');
+        }
+        if (parsed.type === 'message_stop') {
+          safePostMessage(port, { action: 'done' });
+          return;
+        }
+        // OpenAI-style (LM Studio): choices[0].delta.content; reasoning_content = thinking, ignore it
+        // Anthropic: content_block_delta with text_delta; thinking deltas are ignored
+        const chunk = parsed.choices?.[0]?.delta?.content
+          ?? (parsed.delta?.type === 'text_delta' ? parsed.delta.text : undefined);
         if (chunk) {
           chunkCount++;
-          console.log('[BG] chunk #' + chunkCount + ':', chunk);
           if (!safePostMessage(port, { action: 'chunk', text: chunk })) return;
         }
-      } catch (e) { /* skip malformed SSE line */ }
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) throw e;
+        /* skip malformed SSE line */
+      }
     }
   }
 

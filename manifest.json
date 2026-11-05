@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "Local Translator",
   "version": "1.0",
-  "description": "Переводи выделенный текст через локальную модель LM Studio",
+  "description": "Переводи выделенный текст через локальную модель LM Studio или Claude Haiku (Anthropic API)",
   "permissions": ["activeTab", "contextMenus", "scripting", "storage", "tabs"],
-  "host_permissions": ["<all_urls>", "http://localhost/*", "http://127.0.0.1/*"],
+  "host_permissions": ["<all_urls>", "http://localhost/*", "http://127.0.0.1/*", "https://api.anthropic.com/*"],
   "background": {
     "service_worker": "background.js"
   },

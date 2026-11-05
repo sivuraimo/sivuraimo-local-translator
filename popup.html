@@ -41,6 +41,7 @@
       margin-top: 12px;
     }
     label:first-of-type { margin-top: 0; }
+    [hidden] { display: none !important; }
     input, select {
       width: 100%;
       padding: 7px 10px;
@@ -102,8 +103,21 @@
   <h2>🌐 Local Translator</h2>
 
   <div class="section">
-    <label>Порт LM Studio</label>
-    <input type="number" id="port" placeholder="1234" value="1234">
+    <label>Модель</label>
+    <select id="provider">
+      <option value="lmstudio">LM Studio (локально)</option>
+      <option value="anthropic">Anthropic · Claude Haiku</option>
+    </select>
+
+    <div id="lmstudioFields">
+      <label>Порт LM Studio</label>
+      <input type="number" id="port" placeholder="1234" value="1234">
+    </div>
+
+    <div id="anthropicFields" hidden>
+      <label>Anthropic API key</label>
+      <input type="password" id="anthropicKey" placeholder="sk-ant-..." autocomplete="off">
+    </div>
 
     <label>Язык ответа</label>
     <select id="targetLang">
@@ -118,7 +132,8 @@
     <button id="save">Сохранить</button>
     <div class="status" id="status">✓ Сохранено</div>
 
-    <p class="hint">Убедись что в LM Studio включён Local Server (вкладка Local Server → Start)</p>
+    <p class="hint" id="lmstudioHint">Убедись что в LM Studio включён Local Server (вкладка Local Server → Start)</p>
+    <p class="hint" id="anthropicHint" hidden>Ключ хранится только в этом браузере. Создать ключ: console.anthropic.com → API Keys</p>
   </div>
 
   <div class="section">
